@@ -278,4 +278,4 @@ without ffmpeg/GES. Read `crates/viode-cli/tests/cli.rs`
 
 ## License
 
-[MIT](LICENSE) © Eduard Moldovan
+© Eduard Moldovan AB
