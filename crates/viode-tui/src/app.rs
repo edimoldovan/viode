@@ -36,6 +36,9 @@ pub struct App {
     pub dirty: bool,
     pub message: String,
     pub show_help: bool,
+    /// Terminal can draw real images (kitty/ghostty).
+    pub graphics: bool,
+    pub media: crate::media::MediaCache,
     confirm_quit: bool,
     undo: Vec<Project>,
     redo: Vec<Project>,
@@ -53,16 +56,44 @@ impl App {
         Ok(App {
             project,
             project_file: project_file.to_path_buf(),
-            project_dir,
+            project_dir: project_dir.clone(),
             playhead: Time::ZERO,
             dirty: false,
             message: String::from("? for help"),
             show_help: false,
+            graphics: crate::graphics::detect(),
+            media: crate::media::MediaCache::new(&project_dir),
             confirm_quit: false,
             undo: Vec::new(),
             redo: Vec::new(),
             children: Vec::new(),
         })
+    }
+
+    /// Thumbnail PNG for a main-track clip, if generated yet (proxy-aware).
+    pub fn thumb(&mut self, index: usize) -> Option<PathBuf> {
+        let clip = self.project.main().clips.get(index)?.clone();
+        let src = viode_core::proxy_for(&self.project_dir, &clip.src)
+            .unwrap_or_else(|| self.project_dir.join(&clip.src));
+        self.media.get(
+            crate::media::Kind::Thumb,
+            &src,
+            clip.in_.as_secs_f64(),
+            clip.out.as_secs_f64(),
+        )
+    }
+
+    /// Waveform PNG for a main-track clip, if generated yet.
+    pub fn wave(&mut self, index: usize) -> Option<PathBuf> {
+        let clip = self.project.main().clips.get(index)?.clone();
+        let src = viode_core::proxy_for(&self.project_dir, &clip.src)
+            .unwrap_or_else(|| self.project_dir.join(&clip.src));
+        self.media.get(
+            crate::media::Kind::Wave,
+            &src,
+            clip.in_.as_secs_f64(),
+            clip.out.as_secs_f64(),
+        )
     }
 
     /// Index of the clip under the playhead.

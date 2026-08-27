@@ -82,6 +82,14 @@ viode tui
 `viode tui` opens the timeline. There is no mouse and no separate selection:
 **the playhead is the selection** — move it, then act on the clip under it.
 
+In kitty/ghostty (Omarchy's terminals) the TUI draws **real video
+thumbnails** above the clip lane and **audio waveforms** below it via the
+kitty graphics protocol — generated in the background (proxy-aware, cached
+in `cache/tui/`), so the UI never blocks. Everywhere else it falls back to
+pure text automatically (`VIODE_NO_GRAPHICS=1` forces the fallback). All
+colors are named ANSI, so the TUI inherits whatever theme your terminal —
+and therefore aether/Omarchy — is running.
+
 | Keys | Action |
 |---|---|
 | `h` `l` / `H` `L` | move playhead ±0.1s / ±1s |

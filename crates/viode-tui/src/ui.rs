@@ -13,6 +13,11 @@ use ratatui::Frame;
 use viode_core::{Time, TrackKind};
 
 use crate::app::App;
+use crate::graphics::Placement;
+
+/// Rows of real imagery in graphics-capable terminals.
+const THUMB_ROWS: u16 = 4;
+const WAVE_ROWS: u16 = 2;
 
 const CLIP_COLORS: [Color; 4] = [Color::Blue, Color::Cyan, Color::Magenta, Color::Green];
 
@@ -27,24 +32,26 @@ fn block(title: &str) -> Block<'_> {
         ))
 }
 
-pub fn draw(f: &mut Frame, app: &App) {
+pub fn draw(f: &mut Frame, app: &mut App) -> Vec<Placement> {
     let overlay_lanes = app.project.tracks.len().saturating_sub(1) as u16;
     let title_lane = u16::from(!app.project.titles.is_empty());
+    let image_rows = if app.graphics { THUMB_ROWS + WAVE_ROWS } else { 0 };
     let [header, timeline, details, status] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(6 + overlay_lanes + title_lane),
+        Constraint::Length(6 + overlay_lanes + title_lane + image_rows),
         Constraint::Min(3),
         Constraint::Length(1),
     ])
     .areas(f.area());
 
-    draw_header(f, app, header);
-    draw_timeline(f, app, timeline);
-    draw_details(f, app, details);
-    draw_status(f, app, status);
+    draw_header(f, &*app, header);
+    let placements = draw_timeline(f, app, timeline);
+    draw_details(f, &*app, details);
+    draw_status(f, &*app, status);
     if app.show_help {
         draw_help(f);
     }
+    placements
 }
 
 fn draw_header(f: &mut Frame, app: &App, area: Rect) {
@@ -84,7 +91,7 @@ fn col(at: Time, total: u64, width: u64) -> usize {
         as usize
 }
 
-fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
+fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
     let outer = block("timeline");
     let inner = outer.inner(area);
     f.render_widget(outer, area);
@@ -94,7 +101,7 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
                 .style(Style::default().fg(Color::DarkGray)),
             inner,
         );
-        return;
+        return Vec::new();
     }
 
     let width = inner.width as u64;
@@ -170,15 +177,52 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
         lines.push(Line::from(spans));
     }
 
-    // Main lane: proportional blocks, selected clip highlighted.
-    let main = app.project.main();
+    // Geometry of every main-track clip in cells (also used for images).
+    let main = app.project.main().clone();
     let positions = main.positions();
+    let cells: Vec<(usize, usize)> = main
+        .clips
+        .iter()
+        .enumerate()
+        .map(|(i, clip)| {
+            let from = col(positions[i], total, width);
+            let to = col(positions[i] + clip.len(), total, width).max(from + 1);
+            (from, to)
+        })
+        .collect();
+
+    // Thumbnail strip: real frames in graphics terminals. The rows are left
+    // blank in the text buffer; kitty images float over them.
+    let mut placements: Vec<Placement> = Vec::new();
+    if app.graphics {
+        let thumb_y = area.y + 1 + lines.len() as u16;
+        for (i, &(from, to)) in cells.iter().enumerate() {
+            let cols = (to - from) as u16;
+            if cols < 2 {
+                continue;
+            }
+            if let Some(png) = app.thumb(i) {
+                placements.push(Placement {
+                    png,
+                    id: i as u32 + 1,
+                    x: inner.x + from as u16,
+                    y: thumb_y,
+                    cols,
+                    rows: THUMB_ROWS,
+                });
+            }
+        }
+        for _ in 0..THUMB_ROWS {
+            lines.push(Line::raw(""));
+        }
+    }
+
+    // Main lane: proportional blocks, selected clip highlighted.
     let mut lane: Vec<Span> = Vec::new();
     let mut labels: Vec<Span> = Vec::new();
     let mut cursor = 0usize;
     for (i, clip) in main.clips.iter().enumerate() {
-        let from = col(positions[i], total, width);
-        let to = col(positions[i] + clip.len(), total, width).max(from + 1);
+        let (from, to) = cells[i];
         let w = to - from.min(to);
         if from > cursor {
             lane.push(Span::raw(" ".repeat(from - cursor)));
@@ -207,6 +251,30 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
     lines.push(Line::from(lane));
     lines.push(Line::from(labels));
 
+    // Waveform strip under the labels.
+    if app.graphics {
+        let wave_y = area.y + 1 + lines.len() as u16;
+        for (i, &(from, to)) in cells.iter().enumerate() {
+            let cols = (to - from) as u16;
+            if cols < 2 {
+                continue;
+            }
+            if let Some(png) = app.wave(i) {
+                placements.push(Placement {
+                    png,
+                    id: i as u32 + 1001, // distinct id space from thumbs
+                    x: inner.x + from as u16,
+                    y: wave_y,
+                    cols,
+                    rows: WAVE_ROWS,
+                });
+            }
+        }
+        for _ in 0..WAVE_ROWS {
+            lines.push(Line::raw(""));
+        }
+    }
+
     // Bottom playhead marker.
     let mut bottom = vec![' '; width as usize];
     bottom[playhead_col] = '▲';
@@ -216,6 +284,7 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
     ));
 
     f.render_widget(Paragraph::new(lines), inner);
+    placements
 }
 
 fn draw_details(f: &mut Frame, app: &App, area: Rect) {
@@ -339,15 +408,58 @@ mod tests {
             font: None,
         });
         project.save(&file).unwrap();
-        let app = App::open(&file).unwrap();
+        let mut app = App::open(&file).unwrap();
+        app.graphics = false; // text fallback path
 
         let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
-        terminal.draw(|f| draw(f, &app)).unwrap();
+        let mut placements = Vec::new();
+        terminal.draw(|f| placements = draw(f, &mut app)).unwrap();
 
+        assert!(placements.is_empty(), "no images in text mode");
         let content = format!("{:?}", terminal.backend().buffer());
         assert!(content.contains("uidemo"), "header shows project name");
         assert!(content.contains("interview"), "main lane shows clip name");
         assert!(content.contains("broll"), "overlay lane shows track name");
         assert!(content.contains("Intro"), "title lane shows title text");
+    }
+
+    #[test]
+    fn graphics_mode_places_ready_thumbs_and_waves() {
+        let dir = std::env::temp_dir().join(format!("viode-ui-gfx-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join(PROJECT_FILE);
+        let mut project = Project::new("gfx", 30.0, [640, 360]);
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        project
+            .main_mut()
+            .clips
+            .push(Clip::media("media/a.mp4".into(), t(0.0), t(2.0)));
+        project.save(&file).unwrap();
+
+        let mut app = App::open(&file).unwrap();
+        app.graphics = true;
+
+        // Pretend the worker already produced both PNGs (same paths the
+        // cache computes: no proxy, so source = project_dir/media/a.mp4).
+        let src = dir.join("media/a.mp4");
+        for kind in [crate::media::Kind::Thumb, crate::media::Kind::Wave] {
+            let dest = app.media.dest_for(kind, &src, 0.0, 2.0);
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(&dest, b"png").unwrap();
+        }
+
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let mut placements = Vec::new();
+        terminal.draw(|f| placements = draw(f, &mut app)).unwrap();
+
+        assert_eq!(placements.len(), 2, "one thumb + one wave: {placements:?}");
+        let thumb = &placements[0];
+        let wave = &placements[1];
+        assert_eq!(thumb.rows, THUMB_ROWS);
+        assert_eq!(wave.rows, WAVE_ROWS);
+        assert!(wave.y > thumb.y, "waveform strip sits below the thumb strip");
+        assert_ne!(thumb.id, wave.id);
+        assert!(thumb.cols >= 2);
     }
 }

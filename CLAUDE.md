@@ -68,6 +68,14 @@ unit-tested; rendering (`ui.rs`) smoke-tested via TestBackend.
 - TUI: lanes for every track + title markers, theme-inherited ANSI colors,
   rounded borders; edit grammar still drives the main track.
 
+**TUI graphics (post-Phase-5 polish):** kitty graphics protocol
+(`graphics.rs` — detect via TERM/ghostty/KITTY_WINDOW_ID, chunked PNG
+transmit, q=2) renders real thumbnails + waveforms in the timeline;
+`media.rs` worker thread generates them via ffmpeg (proxy-aware, cached
+in cache/tui/ keyed by src+in/out). Text fallback everywhere else;
+`VIODE_NO_GRAPHICS=1` forces it. Images re-emit only when placements
+change. Colors stay named-ANSI so the TUI inherits the Omarchy theme.
+
 All phases complete. Next: polish, packaging (AUR), real-footage dogfooding.
 
 ## Stack decisions (settled — don't relitigate casually)
