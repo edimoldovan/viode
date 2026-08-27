@@ -12,21 +12,21 @@ use crate::time::Time;
 
 pub const PROJECT_FILE: &str = "project.viode";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Project {
     pub project: Meta,
     #[serde(default, rename = "clip")]
     pub clips: Vec<Clip>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Meta {
     pub name: String,
     pub fps: f64,
     pub resolution: [u32; 2],
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Clip {
     /// Path relative to the project directory.
     pub src: PathBuf,

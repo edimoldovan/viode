@@ -136,4 +136,59 @@ mod tests {
         assert_eq!(t.to_string(), "01:02:03.456");
         assert_eq!(Time::parse(&t.to_string()).unwrap(), t);
     }
+
+    #[test]
+    fn sub_saturates_at_zero() {
+        let a = Time::parse("1").unwrap();
+        let b = Time::parse("2").unwrap();
+        assert_eq!(a - b, Time::ZERO);
+    }
+
+    #[test]
+    fn serde_accepts_both_forms() {
+        // Contributors: this is the contract for project.viode files —
+        // times may be written as bare seconds or as timecode strings.
+        #[derive(serde::Deserialize)]
+        struct Doc {
+            a: Time,
+            b: Time,
+            c: Time,
+        }
+        let doc: Doc = toml::from_str(r#"a = 1.5
+b = "01:30"
+c = "00:00:01.500""#)
+            .unwrap();
+        assert_eq!(doc.a, Time(1_500_000_000));
+        assert_eq!(doc.b, Time(90_000_000_000));
+        assert_eq!(doc.c, doc.a);
+    }
+}
+
+// Property tests: the invariants below must hold for ALL inputs, not just
+// hand-picked ones. proptest generates hundreds of cases per run and shrinks
+// any failure to a minimal counterexample — read the failure output, it
+// hands you the regression test.
+#[cfg(test)]
+mod prop_tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Anything we can display, we can parse back — losslessly at the
+        /// millisecond precision Display emits. (Under 100 hours.)
+        #[test]
+        fn display_parse_roundtrip(ms in 0u64..360_000_000) {
+            let t = Time(ms * 1_000_000);
+            prop_assert_eq!(Time::parse(&t.to_string()).unwrap(), t);
+        }
+
+        /// A bare-seconds string parses identically to the same f64 going
+        /// through from_secs_f64 — the TOML number and string forms agree.
+        #[test]
+        fn string_and_number_forms_agree(secs in 0.0f64..360_000.0) {
+            let via_num = Time::from_secs_f64(secs).unwrap();
+            let via_str = Time::parse(&format!("{secs}")).unwrap();
+            prop_assert_eq!(via_num, via_str);
+        }
+    }
 }

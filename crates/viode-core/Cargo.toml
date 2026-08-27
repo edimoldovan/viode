@@ -11,3 +11,7 @@ thiserror.workspace = true
 gstreamer.workspace = true
 gstreamer-editing-services.workspace = true
 gstreamer-pbutils.workspace = true
+
+[dev-dependencies]
+proptest = "1"
+tempfile = "3"

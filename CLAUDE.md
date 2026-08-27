@@ -57,6 +57,30 @@ the timeline; positions are derived, never stored. Times accept `1.5`,
   its pkg-config file (`gst-editing-services-1.0.pc`)
 - `ffmpeg` (present)
 
+## Testing
+
+Coverage is a feature. Every change ships with tests; `cargo test` must stay
+green. The suite has three layers, each with a distinct job:
+
+1. **Unit tests** (`#[cfg(test)]` next to the code) — fast regression net
+   for ops, time parsing, model helpers.
+2. **Property tests** (proptest, in `time.rs` / `ops.rs`) — invariants that
+   must hold for ALL inputs: time display/parse round-trips, split preserves
+   total duration, no op ever produces `in >= out`. New edit ops MUST add a
+   property test for their invariant.
+3. **Integration tests** (`crates/*/tests/`) — `project_roundtrip.rs` pins
+   the project-file contract (save→load lossless, mixed time forms, error
+   messages); `cli.rs` drives the real binary end-to-end and doubles as the
+   contributor walkthrough (`full_edit_workflow` is the product demo in test
+   form).
+
+Rules: media-dependent tests generate their own tiny clips with ffmpeg and
+self-skip (stderr note) when ffmpeg/GES are missing — never commit test
+media, never let the suite go red on a minimal machine. Error-path tests
+assert on the message text: helpful errors are part of the interface.
+
+Coverage check (optional): `cargo install cargo-llvm-cov && cargo llvm-cov --workspace`.
+
 ## Conventions
 
 - KISS. Cuts before effects, CLI before TUI, TUI before GUI. Phase gates in

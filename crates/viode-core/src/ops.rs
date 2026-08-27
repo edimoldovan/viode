@@ -140,3 +140,39 @@ mod tests {
         assert_eq!(pos[1], Time::from_secs_f64(3.0).unwrap());
     }
 }
+
+#[cfg(test)]
+mod prop_tests {
+    use super::*;
+    use crate::model::Project;
+    use proptest::prelude::*;
+
+    proptest! {
+        /// Splitting at ANY valid point never changes the total duration and
+        /// never produces an inverted (in >= out) clip. If you touch split(),
+        /// this is the invariant you must not break.
+        #[test]
+        fn split_preserves_total_duration(
+            in_ms in 0u64..5_000,
+            len_ms in 2u64..600_000,
+            frac in 0.001f64..0.999,
+        ) {
+            let mut p = Project::new("prop", 30.0, [640, 360]);
+            let in_ = Time(in_ms * 1_000_000);
+            let out = Time((in_ms + len_ms) * 1_000_000);
+            p.clips.push(Clip { src: "x.mp4".into(), in_, out, label: None });
+
+            let at = Time(((len_ms as f64 * frac) as u64).max(1) * 1_000_000);
+            prop_assume!(at < p.clips[0].len());
+
+            let before = p.total_duration();
+            split(&mut p, 0, at).unwrap();
+
+            prop_assert_eq!(p.total_duration(), before);
+            for c in &p.clips {
+                prop_assert!(c.in_ < c.out);
+            }
+            prop_assert_eq!(p.clips[0].out, p.clips[1].in_);
+        }
+    }
+}
