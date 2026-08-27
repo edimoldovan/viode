@@ -320,7 +320,7 @@ fn run() -> Result<()> {
             let src = clip_source(&cli.project, &project, index)?;
             let clip = &project.main().clips[index];
             let dest = project_dir(&cli.project).join("cache").join(format!("waveform_{index}.png"));
-            viode_core::waveform_png(&src, clip.in_, clip.out, &dest, width, height)?;
+            viode_core::waveform_png(&src, clip.in_, clip.out, &dest, width, height, "white")?;
             println!("{}", dest.display());
             Ok(())
         }

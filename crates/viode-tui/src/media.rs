@@ -151,7 +151,7 @@ fn generate(job: &Job) -> Result<(), ()> {
             .map_err(|_| ())
         }
         Kind::Wave => {
-            viode_core::waveform_png(&s.src, in_, out, &job.dest, s.px_w.max(16), s.px_h.max(16))
+            viode_core::waveform_png(&s.src, in_, out, &job.dest, s.px_w.max(16), s.px_h.max(16), "0x7d92a8")
                 .map_err(|_| ())
         }
     }

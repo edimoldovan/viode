@@ -41,6 +41,7 @@ pub fn waveform_png(
     dest: &Path,
     width: u32,
     height: u32,
+    color: &str,
 ) -> Result<(), VisualError> {
     run(
         path,
@@ -50,7 +51,7 @@ pub fn waveform_png(
             "-to".into(), out.as_secs_f64().to_string(),
             "-i".into(), path.display().to_string(),
             "-filter_complex".into(),
-            format!("showwavespic=s={width}x{height}:colors=white"),
+            format!("showwavespic=s={width}x{height}:colors={color}"),
             "-frames:v".into(), "1".into(),
         ],
     )

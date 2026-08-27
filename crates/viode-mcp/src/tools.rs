@@ -881,7 +881,7 @@ fn waveform_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (index, clip, src) = clip_and_source(server, args)?;
     let (_, dir) = require_project(server)?;
     let dest = dir.join("cache").join(format!("waveform_{index}.png"));
-    viode_core::waveform_png(&src, clip.in_, clip.out, &dest, 1024, 160)?;
+    viode_core::waveform_png(&src, clip.in_, clip.out, &dest, 1024, 160, "white")?;
     let bytes = std::fs::read(&dest)?;
     Ok(png_content(
         &bytes,
