@@ -7,10 +7,17 @@ decisions.
 
 ## Current status
 
-**Phase 0 (spike).** `src/main.rs` is a throwaway proof: two clips → GES
-timeline → rendered MP4. Once validated, restructure into a cargo workspace
-(`viode-core`, `viode-cli`, `viode-mcp` — see PLAN.md architecture) and Phase 1
-begins. Don't polish the spike.
+**Phase 1 (cuts-only editor) — done.** Cargo workspace:
+
+- `crates/viode-core` — timeline model (`model.rs`), TOML source of truth,
+  pure edit ops (`ops.rs`), ffprobe wrapper (`probe.rs`), `RenderBackend`
+  trait with `GesBackend` (frame-accurate) and `SmartCopyBackend` (lossless,
+  keyframe-snapped) in `backend.rs`, nanosecond `Time` type (`time.rs`).
+- `crates/viode-cli` — the `viode` binary: new / import / probe / add / ls /
+  trim / split / move / rm / render.
+
+Next: **Phase 2 — MCP server** (`viode serve --mcp`, same verbs plus
+frame_grab / render_preview; see PLAN.md).
 
 ## Stack decisions (settled — don't relitigate casually)
 
@@ -23,17 +30,25 @@ begins. Don't polish the spike.
 ## Commands
 
 ```bash
-# Build & run the spike (concatenates assets/clip1.mp4 + clip2.mp4)
-cargo build
-cargo run                          # -> renders/spike.mp4
-cargo run -- a.mp4 b.mp4 -o out.mp4
+cargo build && cargo test          # viode binary -> target/debug/viode
+
+# Typical session
+viode new demo && cd demo
+viode add ~/footage/a.mp4          # copies into media/, probes, appends
+viode ls
+viode split 0 1.5                  # split clip 0 at 1.5s into it
+viode trim 1 --in 0.5 --out 2.5    # source in/out points
+viode move 1 0
+viode render                       # GES, frame-accurate -> renders/demo.mp4
+viode render --smart               # ffmpeg stream-copy, keyframe-snapped
 
 # Regenerate test clips (assets/ is gitignored)
 ./scripts/gen-test-clips.sh
-
-# Inspect a render
-ffprobe -v error -show_format -show_streams renders/spike.mp4
 ```
+
+Timeline is a gapless sequence (Phase 1): clip order in `project.viode` is
+the timeline; positions are derived, never stored. Times accept `1.5`,
+`01:30`, or `00:01:30.250`.
 
 ## System requirements (Arch)
 

@@ -1,9 +1,18 @@
-[package]
-name = "viode"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+resolver = "2"
+members = ["crates/viode-core", "crates/viode-cli"]
 
-[dependencies]
-gstreamer = "0.24.5"
-gstreamer-editing-services = "0.24.5"
-gstreamer-pbutils = "0.24.5"
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+gstreamer = "0.24"
+gstreamer-editing-services = "0.24"
+gstreamer-pbutils = "0.24"

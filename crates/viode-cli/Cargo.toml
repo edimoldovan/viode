@@ -1,0 +1,13 @@
+[package]
+name = "viode-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "viode"
+path = "src/main.rs"
+
+[dependencies]
+viode-core = { path = "../viode-core" }
+clap.workspace = true
+anyhow.workspace = true
