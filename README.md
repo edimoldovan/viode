@@ -108,6 +108,18 @@ viode split <i> <at>                            split clip i at offset
 viode trim <i> [--in T] [--out T]               change source in/out points
 viode move <from> <to>                          reorder clips
 viode rm <i>                                    remove a clip
+viode fade <i> <dur>                            crossfade with previous clip (0 clears)
+viode fx <i> "<gst effect>" [--track N]         add effect, e.g. "videobalance saturation=0"
+viode track add <name> [--kind video|audio]     overlay tracks (B-roll, music)
+viode track ls / on <i> / off <i>               manage tracks
+viode add <file> --track N --at T               place a clip on an overlay track
+viode title "text" --at T --dur D [--font F]    overlay a title
+viode titles [--rm k]                           list / remove titles
+viode sync <a> <b>                              audio-sync offset between two files
+viode angle <file>                              add a synced multicam angle (disabled track)
+viode take <track> <start> <end>                cut to an angle for a timeline range
+viode transcribe <i> [--model M]                whisper.cpp transcript (timed segments)
+viode cut-text <i> <from> <to>                  cut transcript segments out of the video
 viode silences <i>                              list silent stretches
 viode cut-silences <i> [--pad 0.15]             cut dead air (keeps padding)
 viode scenes <i> / split-scenes <i>             scene changes / split at them
@@ -129,8 +141,11 @@ EBU R128 loudness: `youtube` (-14 LUFS), `shorts` (1080x1920 center-crop,
 ## The project file
 
 A project is a directory; the timeline is `project.viode` — plain TOML,
-hand-editable, git-diffable. Clips play back-to-back in file order (the
-gapless-sequence model); positions are derived, never stored.
+hand-editable, git-diffable. Track 0 is the main sequence: clips play
+back-to-back in file order, positions derived, never stored (an optional
+`transition` crossfades with the previous clip). Overlay tracks position
+clips explicitly with `at`; titles sit on top. Old single-track files load
+forever.
 
 ```toml
 [project]
@@ -138,15 +153,58 @@ name = "mycut"
 fps = 30.0
 resolution = [1920, 1080]
 
-[[clip]]
-src = "media/interview.mp4"
-in = "00:00:04.200"   # where playback starts in the source file
-out = "00:01:12.000"  # where it ends
+[[track]]
+name = "main"
 
-[[clip]]
+[[track.clip]]
+src = "media/interview.mp4"
+in = "00:00:04.200"    # where playback starts in the source file
+out = "00:01:12.000"   # where it ends
+
+[[track.clip]]
 src = "media/broll.mp4"
-out = 2.5             # times accept numbers or timecodes; `in` defaults to 0
+out = 2.5              # numbers or timecodes; `in` defaults to 0
+transition = 0.5       # crossfade with the previous clip
+effects = ["videobalance saturation=0.0"]
+
+[[track]]
+name = "music"
+kind = "audio"         # av (default) | video | audio
+
+[[track.clip]]
+src = "media/theme.mp3"
+out = 30.0
+at = 0.0               # overlay tracks are positioned explicitly
+
+[[title]]
+text = "Chapter One"
+at = 1.0
+dur = 3.0
 ```
+
+## Multicam
+
+Angles sync themselves by audio cross-correlation — no clap slate, no
+manual nudging:
+
+```bash
+viode add cam1.mp4          # the reference
+viode angle cam2.mp4        # synced automatically, parked as a disabled track
+viode take 1 05:00 07:30    # cut to cam2 for that timeline range
+```
+
+`take` swaps the synced angle footage onto the main track; total duration
+never changes.
+
+## Edit video by editing text
+
+```bash
+viode transcribe 0          # whisper.cpp -> numbered, timed segments
+viode cut-text 0 12 14      # delete segments 12-14 -> the video cuts itself
+```
+
+Requires whisper.cpp (`pacman -S whisper.cpp`) and a ggml model
+(`VIODE_WHISPER_MODEL` or `--model`).
 
 ## AI editing over MCP
 
@@ -154,12 +212,14 @@ out = 2.5             # times accept numbers or timecodes; `in` defaults to 0
 Claude Code, this repo ships [.mcp.json](.mcp.json)) and the AI gets every
 CLI verb as a tool, plus senses:
 
-- `frame_grab` — returns the frame at any timeline position as an image,
-  so the model can *look at* a cut before judging it
+- `frame_grab` — returns the frame at any timeline position as an image
+  (overlay-aware), so the model can *look at* a cut before judging it
 - `thumbs` / `waveform` — contact sheets and waveform images
 - `audio_levels`, `silence_detect` / `silence_cut`, `scene_detect` /
   `scene_split`
 - `render_preview` — fast sub-range render for checking a section
+- the full edit surface: tracks, effects, fades, titles, multicam
+  (`angle_add` / `take`), and transcripts (`transcribe` / `text_cut`)
 
 A realistic prompt: *"Open the project, cut the silences out of clip 0,
 show me the frame at each remaining cut, and render a shorts version."*
@@ -190,13 +250,18 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 2 | MCP server with visual senses | ✅ |
 | 3 | Silence/scene detection, proxies, waveforms, export presets | ✅ |
 | 4 | The TUI | ✅ |
-| 5 | Multi-track, multicam, transcript-driven editing | ⏳ |
+| 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
 
 ## Development
 
 ```bash
-cargo build && cargo test   # 48 tests: unit, property-based, end-to-end
+cargo build && cargo test          # 54 tests: unit, property-based, end-to-end
+./scripts/bench-longform.sh 10     # long-form performance check
 ```
+
+On 5-minute 720p footage: edit ops ~3 ms, full silence scan 0.8 s, proxy
+build ~60x realtime. Long footage is proxied once, then everything
+interactive touches only proxies.
 
 Tests generate their own media with ffmpeg and self-skip on machines
 without ffmpeg/GES. Read `crates/viode-cli/tests/cli.rs`

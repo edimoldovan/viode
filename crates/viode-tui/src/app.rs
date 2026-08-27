@@ -186,9 +186,9 @@ impl App {
             self.message = "nothing under playhead".into();
             return;
         };
-        let offset = src_time - self.project.clips[index].in_;
+        let offset = src_time - self.project.main().clips[index].in_;
         self.snapshot();
-        match ops::split(&mut self.project, index, offset) {
+        match ops::split(self.project.main_mut(), index, offset) {
             Ok(()) => self.message = format!("split clip {index} at {}", self.playhead),
             Err(e) => {
                 self.project = self.undo.pop().unwrap();
@@ -203,7 +203,7 @@ impl App {
             return;
         };
         self.snapshot();
-        match ops::remove(&mut self.project, index) {
+        match ops::remove(self.project.main_mut(), index) {
             Ok(clip) => {
                 self.message = format!("deleted [{index}] {}", clip.src.display());
                 self.clamp_playhead();
@@ -234,7 +234,7 @@ impl App {
         } else {
             (None, Some(src_time))
         };
-        match ops::trim(&mut self.project, index, in_, out) {
+        match ops::trim(self.project.main_mut(), index, in_, out) {
             Ok(()) => {
                 self.message = format!(
                     "clip {index} {} set to {src_time}",
@@ -255,12 +255,12 @@ impl App {
             return;
         };
         let to = index as i64 + dir;
-        if to < 0 || to >= self.project.clips.len() as i64 {
+        if to < 0 || to >= self.project.main().clips.len() as i64 {
             self.message = "already at the edge".into();
             return;
         }
         self.snapshot();
-        if let Err(e) = ops::move_clip(&mut self.project, index, to as usize) {
+        if let Err(e) = ops::move_clip(self.project.main_mut(), index, to as usize) {
             self.project = self.undo.pop().unwrap();
             self.message = e.to_string();
         } else {
@@ -299,7 +299,7 @@ impl App {
             self.message = "nothing under playhead".into();
             return;
         };
-        let clip = &self.project.clips[index];
+        let clip = &self.project.main().clips[index];
         let src = viode_core::proxy_for(&self.project_dir, &clip.src)
             .unwrap_or_else(|| self.project_dir.join(&clip.src));
         let args = mpv_args(&src, src_time, clip.out);
@@ -313,16 +313,18 @@ impl App {
     }
 
     fn preview_timeline(&mut self) {
-        if self.project.clips.is_empty() {
+        if self.project.main().clips.is_empty() {
             self.message = "timeline is empty".into();
             return;
         }
         // Proxied copy for speed where proxies exist.
         let mut preview = self.project.clone();
-        for clip in &mut preview.clips {
+        for track in &mut preview.tracks {
+        for clip in &mut track.clips {
             if let Some(p) = viode_core::proxy_for(&self.project_dir, &clip.src) {
                 clip.src = p;
             }
+        }
         }
         let out = self.project_dir.join("cache").join("tui-preview.mp4");
         self.message = "rendering preview…".into();
@@ -339,7 +341,7 @@ impl App {
     }
 
     fn render(&mut self) {
-        if self.project.clips.is_empty() {
+        if self.project.main().clips.is_empty() {
             self.message = "timeline is empty".into();
             return;
         }
@@ -389,10 +391,13 @@ mod tests {
         let mut project = Project::new("t", 30.0, [640, 360]);
         let t = |s| Time::from_secs_f64(s).unwrap();
         for _ in 0..2 {
-            project.clips.push(Clip {
+            project.main_mut().clips.push(Clip {
                 src: "media/a.mp4".into(),
                 in_: t(0.0),
                 out: t(2.0),
+                at: None,
+                transition: None,
+                effects: Vec::new(),
                 label: None,
             });
         }
@@ -431,12 +436,12 @@ mod tests {
         let mut a = app();
         a.playhead = t(1.0);
         a.on_key(KeyCode::Char('s'));
-        assert_eq!(a.project.clips.len(), 3);
+        assert_eq!(a.project.main().clips.len(), 3);
         assert!(a.dirty);
         a.on_key(KeyCode::Char('u'));
-        assert_eq!(a.project.clips.len(), 2, "undo restores");
+        assert_eq!(a.project.main().clips.len(), 2, "undo restores");
         a.on_key(KeyCode::Char('U'));
-        assert_eq!(a.project.clips.len(), 3, "redo reapplies");
+        assert_eq!(a.project.main().clips.len(), 3, "redo reapplies");
     }
 
     #[test]
@@ -444,7 +449,7 @@ mod tests {
         let mut a = app();
         a.playhead = t(2.5); // 0.5s into clip 1
         a.on_key(KeyCode::Char('i'));
-        assert_eq!(a.project.clips[1].in_, t(0.5));
+        assert_eq!(a.project.main().clips[1].in_, t(0.5));
         assert_eq!(a.project.total_duration(), t(3.5));
     }
 
@@ -453,7 +458,7 @@ mod tests {
         let mut a = app();
         a.playhead = t(3.0);
         a.on_key(KeyCode::Char('d'));
-        assert_eq!(a.project.clips.len(), 1);
+        assert_eq!(a.project.main().clips.len(), 1);
         assert!(a.playhead < a.project.total_duration());
     }
 
@@ -495,7 +500,7 @@ mod tests {
         a.on_key(KeyCode::Char('w'));
         assert!(!a.dirty);
         let reloaded = Project::load(&a.project_file).unwrap();
-        assert_eq!(reloaded.clips.len(), 3);
+        assert_eq!(reloaded.main().clips.len(), 3);
     }
 
     #[test]

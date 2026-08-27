@@ -118,7 +118,9 @@ fn handshake_and_tool_listing() {
     for expected in [
         "project_new", "project_open", "timeline_get", "media_probe",
         "clip_add", "clip_trim", "clip_split", "clip_move", "clip_remove",
-        "frame_grab", "render_preview", "render",
+        "frame_grab", "render_preview", "render", "track_add", "track_toggle",
+        "fade_set", "fx_add", "fx_clear", "title_add", "title_remove",
+        "angle_add", "take", "transcribe", "text_cut",
     ] {
         assert!(names.contains(&expected), "missing tool {expected}, have {names:?}");
     }
@@ -149,7 +151,7 @@ fn full_mcp_editing_session() {
     let result = mcp.tool("clip_add", json!({"src": clip_path.to_str().unwrap()}));
     let timeline: Value =
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
-    assert_eq!(timeline["clips"][0]["src"], json!("media/interview.mp4"));
+    assert_eq!(timeline["tracks"][0]["clips"][0]["src"], json!("media/interview.mp4"));
     assert_eq!(timeline["total"], json!("00:00:02.000"));
 
     // Edit: split at 0.5, drop the head, keep 1.5s.
@@ -158,7 +160,7 @@ fn full_mcp_editing_session() {
     let timeline: Value =
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
     assert_eq!(timeline["total"], json!("00:00:01.500"));
-    assert_eq!(timeline["clips"][0]["in"], json!("00:00:00.500"));
+    assert_eq!(timeline["tracks"][0]["clips"][0]["in"], json!("00:00:00.500"));
 
     // The model can look at the edit: frame_grab returns a PNG image block.
     let result = mcp.tool("frame_grab", json!({"at": "0.2"}));

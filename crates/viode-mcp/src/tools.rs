@@ -61,14 +61,119 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "clip_add",
-            "Append a clip to the timeline. Files outside the project are \
-             copied into media/. in/out default to the whole file.",
+            "Append a clip. Files outside the project are copied into \
+             media/. in/out default to the whole file. track 0 (default) is \
+             the main sequence; overlay tracks also need `at`.",
             json!({
                 "src": {"type": "string"},
                 "in": time_schema,
                 "out": time_schema,
+                "track": {"type": "integer", "default": 0},
+                "at": time_schema,
             }),
             &["src"],
+        ),
+        tool(
+            "track_add",
+            "Add a track: kind av (audio+video), video (overlay, keeps main \
+             audio), or audio (music/VO).",
+            json!({
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": ["av", "video", "audio"], "default": "av"},
+            }),
+            &["name"],
+        ),
+        tool(
+            "track_toggle",
+            "Enable/disable a track (disabled tracks stay in the file but \
+             are excluded from renders — how multicam angles wait).",
+            json!({ "index": {"type": "integer"}, "enabled": {"type": "boolean"} }),
+            &["index", "enabled"],
+        ),
+        tool(
+            "fade_set",
+            "Crossfade a main-track clip with the previous one (duration 0 \
+             clears it).",
+            json!({ "index": {"type": "integer"}, "duration": time_schema }),
+            &["index", "duration"],
+        ),
+        tool(
+            "fx_add",
+            "Add a GStreamer effect to a clip, e.g. \"videobalance \
+             saturation=0\" (b/w) or \"gamma gamma=1.2\".",
+            json!({
+                "index": {"type": "integer"},
+                "effect": {"type": "string"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "effect"],
+        ),
+        tool(
+            "fx_clear",
+            "Remove all effects from a clip.",
+            json!({
+                "index": {"type": "integer"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index"],
+        ),
+        tool(
+            "title_add",
+            "Overlay a text title on the timeline.",
+            json!({
+                "text": {"type": "string"},
+                "at": time_schema,
+                "dur": time_schema,
+                "font": {"type": "string", "description": "Pango font description, e.g. \"Sans Bold 64\""},
+            }),
+            &["text", "at", "dur"],
+        ),
+        tool(
+            "title_remove",
+            "Remove a title by index (see timeline_get).",
+            json!({ "index": {"type": "integer"} }),
+            &["index"],
+        ),
+        tool(
+            "angle_add",
+            "Multicam: add a camera angle. Syncs it to the main footage by \
+             audio cross-correlation and adds it as a disabled track. Then \
+             use `take` to cut to it.",
+            json!({ "path": {"type": "string"} }),
+            &["path"],
+        ),
+        tool(
+            "take",
+            "Multicam: replace the [start, end) timeline range of the main \
+             track with the synced footage from an angle track.",
+            json!({
+                "track": {"type": "integer"},
+                "start": time_schema,
+                "end": time_schema,
+            }),
+            &["track", "start", "end"],
+        ),
+        tool(
+            "transcribe",
+            "Transcribe a main-track clip with whisper.cpp into timed \
+             segments (source time). Enables text-based editing via text_cut.",
+            json!({
+                "index": {"type": "integer"},
+                "model": {"type": "string", "description": "path to a ggml model; defaults to VIODE_WHISPER_MODEL"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "text_cut",
+            "Edit video by editing text: cut transcript segments [from..=to] \
+             out of a clip (run transcribe first).",
+            json!({
+                "index": {"type": "integer"},
+                "from": {"type": "integer"},
+                "to": {"type": "integer"},
+                "pad": {"type": "number", "default": 0.05},
+            }),
+            &["index", "from", "to"],
         ),
         tool(
             "clip_trim",
@@ -208,18 +313,87 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
         "media_probe" => media_probe(args),
         "clip_add" => clip_add(server, args),
         "clip_trim" => edit(server, |p| {
-            Ok(ops::trim(p, index_arg(args, "index")?, time_opt(args, "in")?, time_opt(args, "out")?)?)
+            Ok(ops::trim(p.main_mut(), index_arg(args, "index")?, time_opt(args, "in")?, time_opt(args, "out")?)?)
         }),
         "clip_split" => edit(server, |p| {
-            Ok(ops::split(p, index_arg(args, "index")?, time_req(args, "at")?)?)
+            Ok(ops::split(p.main_mut(), index_arg(args, "index")?, time_req(args, "at")?)?)
         }),
         "clip_move" => edit(server, |p| {
-            Ok(ops::move_clip(p, index_arg(args, "from")?, index_arg(args, "to")?)?)
+            Ok(ops::move_clip(p.main_mut(), index_arg(args, "from")?, index_arg(args, "to")?)?)
         }),
         "clip_remove" => edit(server, |p| {
-            ops::remove(p, index_arg(args, "index")?)?;
+            ops::remove(p.main_mut(), index_arg(args, "index")?)?;
             Ok(())
         }),
+        "fade_set" => edit(server, |p| {
+            let d = time_req(args, "duration")?;
+            let d = (d != Time::ZERO).then_some(d);
+            Ok(ops::set_transition(p.main_mut(), index_arg(args, "index")?, d)?)
+        }),
+        "track_add" => edit(server, |p| {
+            let kind = match args.get("kind").and_then(Value::as_str).unwrap_or("av") {
+                "av" => viode_core::TrackKind::Av,
+                "video" => viode_core::TrackKind::Video,
+                "audio" => viode_core::TrackKind::Audio,
+                other => bail!("unknown kind {other:?} (av, video, audio)"),
+            };
+            p.tracks.push(viode_core::Track::new(str_arg(args, "name")?, kind));
+            Ok(())
+        }),
+        "track_toggle" => edit(server, |p| {
+            let index = index_arg(args, "index")?;
+            if index == 0 {
+                bail!("the main track can't be disabled");
+            }
+            let enabled = args
+                .get("enabled")
+                .and_then(Value::as_bool)
+                .context("missing boolean argument: enabled")?;
+            ops::track_mut(p, index)?.enabled = enabled;
+            Ok(())
+        }),
+        "fx_add" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let effect = str_arg(args, "effect")?.to_string();
+            let t = ops::track_mut(p, track)?;
+            if index >= t.clips.len() {
+                bail!("clip index {index} out of range");
+            }
+            t.clips[index].effects.push(effect);
+            Ok(())
+        }),
+        "fx_clear" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let t = ops::track_mut(p, track)?;
+            if index >= t.clips.len() {
+                bail!("clip index {index} out of range");
+            }
+            t.clips[index].effects.clear();
+            Ok(())
+        }),
+        "title_add" => edit(server, |p| {
+            p.titles.push(viode_core::Title {
+                text: str_arg(args, "text")?.to_string(),
+                at: time_req(args, "at")?,
+                dur: time_req(args, "dur")?,
+                font: args.get("font").and_then(Value::as_str).map(String::from),
+            });
+            Ok(())
+        }),
+        "title_remove" => edit(server, |p| {
+            let index = index_arg(args, "index")?;
+            if index >= p.titles.len() {
+                bail!("title index {index} out of range");
+            }
+            p.titles.remove(index);
+            Ok(())
+        }),
+        "angle_add" => angle_add(server, args),
+        "take" => take(server, args),
+        "transcribe" => transcribe_tool(server, args),
+        "text_cut" => text_cut(server, args),
         "proxy_build" => proxy_build(server, args),
         "audio_levels" => audio_levels_tool(server, args),
         "waveform" => waveform_tool(server, args),
@@ -300,18 +474,41 @@ fn edit(server: &mut Server, f: impl FnOnce(&mut Project) -> Result<()>) -> Resu
 }
 
 fn timeline_json(project: &Project) -> Value {
-    let positions = project.positions();
+    let tracks: Vec<Value> = project
+        .tracks
+        .iter()
+        .enumerate()
+        .map(|(ti, track)| {
+            let positions: Vec<_> = if ti == 0 {
+                track.positions()
+            } else {
+                track.clips.iter().map(|c| c.span().0).collect()
+            };
+            json!({
+                "index": ti,
+                "name": track.name,
+                "kind": format!("{:?}", track.kind).to_lowercase(),
+                "enabled": track.enabled,
+                "clips": track.clips.iter().zip(&positions).enumerate().map(|(i, (c, start))| json!({
+                    "index": i,
+                    "src": c.src,
+                    "in": c.in_.to_string(),
+                    "out": c.out.to_string(),
+                    "start": start.to_string(),
+                    "len": c.len().to_string(),
+                    "transition": c.transition.map(|t| t.to_string()),
+                    "effects": c.effects,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect();
     json!({
         "name": project.project.name,
         "fps": project.project.fps,
         "resolution": project.project.resolution,
-        "clips": project.clips.iter().zip(&positions).enumerate().map(|(i, (c, start))| json!({
-            "index": i,
-            "src": c.src,
-            "in": c.in_.to_string(),
-            "out": c.out.to_string(),
-            "start": start.to_string(),
-            "len": c.len().to_string(),
+        "tracks": tracks,
+        "titles": project.titles.iter().enumerate().map(|(k, t)| json!({
+            "index": k, "text": t.text, "at": t.at.to_string(), "dur": t.dur.to_string(),
         })).collect::<Vec<_>>(),
         "total": project.total_duration().to_string(),
     })
@@ -384,30 +581,22 @@ fn clip_add(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     let mut project = Project::load(&file)?;
 
     // Same convention as the CLI: outside files get copied into media/.
-    let canon_dir = std::fs::canonicalize(&dir)?;
-    let canon_src = std::fs::canonicalize(&src)
-        .with_context(|| format!("{} not found", src.display()))?;
-    let rel = match canon_src.strip_prefix(&canon_dir) {
-        Ok(rel) => rel.to_path_buf(),
-        Err(_) => {
-            let name = canon_src.file_name().context("source has no file name")?;
-            let dest = dir.join("media").join(name);
-            if dest.exists() {
-                bail!("media/{} already exists", name.to_string_lossy());
-            }
-            std::fs::create_dir_all(dir.join("media"))?;
-            std::fs::copy(&canon_src, &dest)?;
-            PathBuf::from("media").join(name)
-        }
-    };
+    let rel = bring_in(&dir, &src)?;
 
-    let info = probe(&dir.join(&rel))?;
+    let info = viode_core::probe::probe_cached(&dir, &dir.join(&rel))?;
     let in_ = time_opt(args, "in")?.unwrap_or(Time::ZERO);
     let out = time_opt(args, "out")?.unwrap_or(info.duration);
     if out > info.duration {
         bail!("out {out} beyond source duration {}", info.duration);
     }
-    ops::add(&mut project, Clip { src: rel, in_, out, label: None })?;
+    let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+    let at = time_opt(args, "at")?;
+    if track > 0 && at.is_none() {
+        bail!("overlay tracks need `at` (timeline position)");
+    }
+    let mut clip = Clip::media(rel, in_, out);
+    clip.at = if track == 0 { None } else { at };
+    ops::add(ops::track_mut(&mut project, track)?, clip)?;
     project.save(&file)?;
     timeline_get(server)
 }
@@ -418,6 +607,7 @@ fn clip_and_source(server: &Server, args: &Value) -> Result<(usize, Clip, PathBu
     let project = Project::load(&file)?;
     let index = index_arg(args, "index")?;
     let clip = project
+        .main()
         .clips
         .get(index)
         .with_context(|| format!("clip index {index} out of range"))?
@@ -462,7 +652,7 @@ fn silence_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     let pad = Time::from_secs_f64(f64_arg(args, "pad", 0.15))?;
     let (file, _) = require_project(server)?;
     let mut project = Project::load(&file)?;
-    let stats = ops::remove_source_ranges(&mut project, index, &silences, pad)?;
+    let stats = ops::remove_source_ranges(project.main_mut(), index, &silences, pad)?;
     project.save(&file)?;
     let mut content = text(format!(
         "cut {} of silence ({} segments kept)",
@@ -492,9 +682,152 @@ fn scene_split(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     let scenes = viode_core::detect_scenes(&src, f64_arg(args, "threshold", 0.4))?;
     let (file, _) = require_project(server)?;
     let mut project = Project::load(&file)?;
-    let n = ops::split_at_source_times(&mut project, index, &scenes)?;
+    let n = ops::split_at_source_times(project.main_mut(), index, &scenes)?;
     project.save(&file)?;
     let mut content = text(format!("split clip {index} into {n} segments"));
+    content.extend(timeline_get(server)?);
+    Ok(content)
+}
+
+/// Copy a file into media/ unless already inside the project (shared by
+/// clip_add and angle_add).
+fn bring_in(dir: &Path, src: &Path) -> Result<PathBuf> {
+    let canon_dir = std::fs::canonicalize(dir)?;
+    let canon_src = std::fs::canonicalize(src)
+        .with_context(|| format!("{} not found", src.display()))?;
+    match canon_src.strip_prefix(&canon_dir) {
+        Ok(rel) => Ok(rel.to_path_buf()),
+        Err(_) => {
+            let name = canon_src.file_name().context("source has no file name")?;
+            let dest = dir.join("media").join(name);
+            if dest.exists() {
+                let same = std::fs::metadata(&canon_src).map(|m| m.len()).ok()
+                    == std::fs::metadata(&dest).map(|m| m.len()).ok();
+                if same {
+                    return Ok(PathBuf::from("media").join(name));
+                }
+                bail!(
+                    "media/{} already exists with different content",
+                    name.to_string_lossy()
+                );
+            }
+            std::fs::create_dir_all(dir.join("media"))?;
+            std::fs::copy(&canon_src, &dest)?;
+            Ok(PathBuf::from("media").join(name))
+        }
+    }
+}
+
+fn angle_add(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let mut project = Project::load(&file)?;
+    let main_clip = project
+        .main()
+        .clips
+        .first()
+        .context("add main footage before angles")?
+        .clone();
+    let reference = dir.join(&main_clip.src);
+
+    let rel = bring_in(&dir, Path::new(str_arg(args, "path")?))?;
+    let angle_path = dir.join(&rel);
+    let info = viode_core::probe::probe_cached(&dir, &angle_path)?;
+    let offset = viode_core::audio_offset(&reference, &angle_path, 60.0)?;
+
+    let mut clip = Clip::media(rel.clone(), Time::ZERO, info.duration);
+    if offset >= 0.0 {
+        clip.at = Some(Time::from_secs_f64(offset)?);
+    } else {
+        clip.in_ = Time::from_secs_f64(-offset)?;
+        clip.at = Some(Time::ZERO);
+    }
+
+    let n = project.tracks.len();
+    let mut track = viode_core::Track::new(&format!("angle{n}"), viode_core::TrackKind::Av);
+    track.enabled = false;
+    track.clips.push(clip);
+    project.tracks.push(track);
+    project.save(&file)?;
+    let mut content = text(format!(
+        "track {n} (angle{n}): {} synced, audio offset {offset:+.3}s. \
+         Use take {{track: {n}, start, end}} to cut to it.",
+        rel.display()
+    ));
+    content.extend(timeline_get(server)?);
+    Ok(content)
+}
+
+fn take(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, _) = require_project(server)?;
+    let mut project = Project::load(&file)?;
+    let track_idx = index_arg(args, "track")?;
+    if track_idx == 0 {
+        bail!("take copies FROM an angle track (1+) onto the main track");
+    }
+    let (start, end) = (time_req(args, "start")?, time_req(args, "end")?);
+    let angle = ops::track(&project, track_idx)?;
+    let clip = angle.clips.first().context("angle track has no clip")?;
+    let (a_start, a_end) = clip.span();
+    if start < a_start || end > a_end {
+        bail!("angle {track_idx} only covers {a_start}..{a_end}");
+    }
+    let mut take = clip.clone();
+    take.in_ = clip.in_ + (start - a_start);
+    take.out = take.in_ + (end - start);
+    ops::replace_range(project.main_mut(), start, end, take)?;
+    project.save(&file)?;
+    timeline_get(server)
+}
+
+fn transcript_path(dir: &Path, index: usize) -> PathBuf {
+    dir.join("cache").join(format!("transcript_{index}.json"))
+}
+
+fn transcribe_tool(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, _, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    let model = args.get("model").and_then(Value::as_str).map(PathBuf::from);
+    let segments = viode_core::transcribe(&src, &dir.join("cache"), model.as_deref())?;
+    std::fs::write(
+        transcript_path(&dir, index),
+        serde_json::to_string_pretty(&segments)?,
+    )?;
+    let listing: Vec<Value> = segments
+        .iter()
+        .enumerate()
+        .map(|(k, s)| {
+            json!({"index": k, "start": s.start.to_string(), "end": s.end.to_string(), "text": s.text})
+        })
+        .collect();
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "clip": index,
+        "segments": listing,
+        "note": "source time; cut ranges with text_cut {index, from, to}",
+    }))?))
+}
+
+fn text_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let index = index_arg(args, "index")?;
+    let json_text = std::fs::read_to_string(transcript_path(&dir, index))
+        .with_context(|| format!("no transcript for clip {index} — run transcribe first"))?;
+    let segments: Vec<viode_core::Segment> = serde_json::from_str(&json_text)?;
+    let (from, to) = (index_arg(args, "from")?, index_arg(args, "to")?);
+    if from > to || to >= segments.len() {
+        bail!("segment range {from}..={to} out of range (0..{})", segments.len().saturating_sub(1));
+    }
+    let ranges: Vec<(Time, Time)> = segments[from..=to].iter().map(|s| (s.start, s.end)).collect();
+    let pad = Time::from_secs_f64(f64_arg(args, "pad", 0.05))?;
+
+    let mut project = Project::load(&file)?;
+    let stats = ops::remove_source_ranges(project.main_mut(), index, &ranges, pad)?;
+    project.save(&file)?;
+    let mut content = text(format!(
+        "cut {} across {} transcript segments ({} clip segments kept)",
+        stats.removed,
+        to - from + 1,
+        stats.segments_kept
+    ));
     content.extend(timeline_get(server)?);
     Ok(content)
 }
@@ -514,7 +847,7 @@ fn proxy_build(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (file, dir) = require_project(server)?;
     let project = Project::load(&file)?;
     let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
-    let mut sources: Vec<_> = project.clips.iter().map(|c| c.src.clone()).collect();
+    let mut sources: Vec<_> = project.tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.src.clone())).collect();
     sources.sort();
     sources.dedup();
     let mut lines = Vec::new();
@@ -578,12 +911,33 @@ fn frame_grab(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (file, dir) = require_project(server)?;
     let project = Project::load(&file)?;
     let at = time_req(args, "at")?;
-    let (index, src_time) = ops::source_at(&project, at).with_context(|| {
-        format!("{at} is past the end of the timeline ({})", project.total_duration())
-    })?;
+    // The visible frame comes from the topmost enabled video-capable
+    // overlay covering this time, else the main sequence.
+    let mut located: Option<(std::path::PathBuf, Time, String)> = None;
+    for track in project.tracks.iter().skip(1).rev() {
+        if !track.enabled || track.kind == viode_core::TrackKind::Audio {
+            continue;
+        }
+        if let Some(clip) = track.clips.iter().find(|c| {
+            let (s, e) = c.span();
+            at >= s && at < e
+        }) {
+            let src_time = clip.in_ + (at - clip.span().0);
+            located = Some((clip.src.clone(), src_time, track.name.clone()));
+            break;
+        }
+    }
+    let (rel_src, src_time, from) = match located {
+        Some((s, t, name)) => (s, t, name),
+        None => {
+            let (index, src_time) = ops::source_at(&project, at).with_context(|| {
+                format!("{at} is past the end of the timeline ({})", project.total_duration())
+            })?;
+            (project.main().clips[index].src.clone(), src_time, format!("main clip {index}"))
+        }
+    };
     // Proxy when available: same picture, far cheaper seek on big footage.
-    let src = viode_core::proxy_for(&dir, &project.clips[index].src)
-        .unwrap_or_else(|| dir.join(&project.clips[index].src));
+    let src = viode_core::proxy_for(&dir, &rel_src).unwrap_or_else(|| dir.join(&rel_src));
 
     let out = Command::new("ffmpeg")
         .args(["-v", "error", "-ss", &src_time.as_secs_f64().to_string(), "-i"])
@@ -608,7 +962,7 @@ fn frame_grab(server: &Server, args: &Value) -> Result<Vec<Value>> {
         }),
         json!({
             "type": "text",
-            "text": format!("frame at {at} (clip {index}, source time {src_time})"),
+            "text": format!("frame at {at} (from {from}, source time {src_time})"),
         }),
     ])
 }
@@ -621,9 +975,11 @@ fn render_preview(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let mut sub = ops::extract_range(&project, start, end)?;
 
     // Previews are for looking, not delivering: use proxies where built.
-    for clip in &mut sub.clips {
-        if let Some(proxy) = viode_core::proxy_for(&dir, &clip.src) {
-            clip.src = proxy;
+    for track in &mut sub.tracks {
+        for clip in &mut track.clips {
+            if let Some(proxy) = viode_core::proxy_for(&dir, &clip.src) {
+                clip.src = proxy;
+            }
         }
     }
 
@@ -639,7 +995,7 @@ fn render_preview(server: &Server, args: &Value) -> Result<Vec<Value>> {
 fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (file, dir) = require_project(server)?;
     let project = Project::load(&file)?;
-    if project.clips.is_empty() {
+    if project.main().clips.is_empty() && project.tracks.len() == 1 && project.titles.is_empty() {
         bail!("timeline is empty, nothing to render");
     }
     let name = &project.project.name;

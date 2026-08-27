@@ -1,20 +1,38 @@
 //! Rendering: App state -> one ratatui frame. Pure function of the state,
 //! smoke-tested against a TestBackend.
+//!
+//! Style rule: only named ANSI colors — the TUI inherits the terminal
+//! palette, so it automatically matches the user's Omarchy/aether theme.
 
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Clear, Paragraph};
 use ratatui::Frame;
+
+use viode_core::{Time, TrackKind};
 
 use crate::app::App;
 
 const CLIP_COLORS: [Color; 4] = [Color::Blue, Color::Cyan, Color::Magenta, Color::Green];
 
+fn block(title: &str) -> Block<'_> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            format!(" {title} "),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+        ))
+}
+
 pub fn draw(f: &mut Frame, app: &App) {
+    let overlay_lanes = app.project.tracks.len().saturating_sub(1) as u16;
+    let title_lane = u16::from(!app.project.titles.is_empty());
     let [header, timeline, details, status] = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(6),
+        Constraint::Length(6 + overlay_lanes + title_lane),
         Constraint::Min(3),
         Constraint::Length(1),
     ])
@@ -33,28 +51,47 @@ fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let meta = &app.project.project;
     let line = Line::from(vec![
         Span::styled(
-            format!(" {}{} ", meta.name, if app.dirty { " *" } else { "" }),
-            Style::default().add_modifier(Modifier::BOLD),
+            format!(" {} ", meta.name),
+            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
         ),
-        Span::raw(format!(
-            "{}x{} @ {} fps   {} clips   total {}",
-            meta.resolution[0],
-            meta.resolution[1],
-            meta.fps,
-            app.project.clips.len(),
-            app.project.total_duration(),
-        )),
+        Span::styled(
+            if app.dirty { "● " } else { "" },
+            Style::default().fg(Color::Red),
+        ),
+        Span::styled(
+            format!(
+                "{}x{} @ {} fps  ·  {} track{}  ·  {} clips  ·  ",
+                meta.resolution[0],
+                meta.resolution[1],
+                meta.fps,
+                app.project.tracks.len(),
+                if app.project.tracks.len() == 1 { "" } else { "s" },
+                app.project.main().clips.len(),
+            ),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            app.project.total_duration().to_string(),
+            Style::default().fg(Color::Cyan),
+        ),
     ]);
     f.render_widget(Paragraph::new(line), area);
 }
 
+/// Column of a timeline position, given total duration and lane width.
+fn col(at: Time, total: u64, width: u64) -> usize {
+    ((at.0 as u128 * width as u128) / total.max(1) as u128).min(width.saturating_sub(1) as u128)
+        as usize
+}
+
 fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title(" timeline ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
-    if app.project.clips.is_empty() {
+    let outer = block("timeline");
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
+    if app.project.main().clips.is_empty() && app.project.tracks.len() == 1 {
         f.render_widget(
-            Paragraph::new("empty — `viode add <file>` some footage first"),
+            Paragraph::new("empty — `viode add <file>` some footage first")
+                .style(Style::default().fg(Color::DarkGray)),
             inner,
         );
         return;
@@ -63,32 +100,90 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
     let width = inner.width as u64;
     let total = app.project.total_duration().0.max(1);
     let selected = app.selected();
+    let playhead_col = col(app.playhead, total, width);
+    let mut lines: Vec<Line> = Vec::new();
 
-    // Each clip gets a proportional span of the width (at least 1 column).
-    let mut widths: Vec<u64> = app
-        .project
-        .clips
-        .iter()
-        .map(|c| ((c.len().0 as u128 * width as u128) / total as u128).max(1) as u64)
-        .collect();
-    // Trim overflow from the widest clips so the lane fits.
-    while widths.iter().sum::<u64>() > width && widths.iter().any(|w| *w > 1) {
-        if let Some(max) = widths.iter_mut().max() {
-            *max -= 1;
+    // Timecode ruler with the playhead marker.
+    let mut ruler: Vec<char> = vec!['·'; width as usize];
+    let tick_every = (width / 6).max(1);
+    for tick in (0..width).step_by(tick_every as usize) {
+        let t = Time((tick as u128 * total as u128 / width.max(1) as u128) as u64);
+        let label: Vec<char> = format!("{t}").chars().skip(3).take(9).collect(); // MM:SS.mmm
+        for (k, ch) in label.into_iter().enumerate() {
+            let x = tick as usize + k;
+            if x < ruler.len() {
+                ruler[x] = ch;
+            }
         }
     }
+    ruler[playhead_col] = '▼';
+    lines.push(Line::styled(
+        ruler.into_iter().collect::<String>(),
+        Style::default().fg(Color::DarkGray),
+    ));
 
-    // Ruler with the playhead marker.
-    let playhead_col = ((app.playhead.0 as u128 * width.max(1) as u128) / total as u128)
-        .min(width.saturating_sub(1) as u128) as usize;
-    let ruler: String = (0..width as usize)
-        .map(|i| if i == playhead_col { '▼' } else { ' ' })
-        .collect();
+    // Title lane (markers on top).
+    if !app.project.titles.is_empty() {
+        let mut lane: Vec<char> = vec![' '; width as usize];
+        for title in &app.project.titles {
+            let from = col(title.at, total, width);
+            let to = col(title.at + title.dur, total, width).max(from + 1);
+            for x in from..to {
+                lane[x] = '▔';
+            }
+            for (k, ch) in title.text.chars().take(to - from).enumerate() {
+                lane[from + k] = ch;
+            }
+        }
+        lines.push(Line::styled(
+            lane.into_iter().collect::<String>(),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
 
-    // The clip lane: colored blocks, selected clip bold-reversed.
-    let mut lane = Vec::new();
-    let mut labels = Vec::new();
-    for (i, (clip, w)) in app.project.clips.iter().zip(&widths).enumerate() {
+    // Overlay lanes, topmost first (matching render stacking).
+    for (ti, track) in app.project.tracks.iter().enumerate().skip(1).rev() {
+        let mut spans: Vec<Span> = Vec::new();
+        let mut cursor = 0usize;
+        let color = if track.kind == TrackKind::Audio { Color::Green } else { Color::Magenta };
+        let style = if track.enabled {
+            Style::default().fg(color)
+        } else {
+            Style::default().fg(Color::DarkGray).add_modifier(Modifier::DIM)
+        };
+        for clip in &track.clips {
+            let (s, e) = clip.span();
+            let from = col(s, total, width);
+            let to = col(e, total, width).max(from + 1);
+            if from > cursor {
+                spans.push(Span::raw(" ".repeat(from - cursor)));
+            }
+            let w = to - from;
+            let label = truncate(
+                &format!("{}{}", track.name, if track.enabled { "" } else { " (off)" }),
+                w,
+            );
+            spans.push(Span::styled(format!("{label:▁<w$}"), style));
+            cursor = to;
+        }
+        let _ = ti;
+        lines.push(Line::from(spans));
+    }
+
+    // Main lane: proportional blocks, selected clip highlighted.
+    let main = app.project.main();
+    let positions = main.positions();
+    let mut lane: Vec<Span> = Vec::new();
+    let mut labels: Vec<Span> = Vec::new();
+    let mut cursor = 0usize;
+    for (i, clip) in main.clips.iter().enumerate() {
+        let from = col(positions[i], total, width);
+        let to = col(positions[i] + clip.len(), total, width).max(from + 1);
+        let w = to - from.min(to);
+        if from > cursor {
+            lane.push(Span::raw(" ".repeat(from - cursor)));
+            labels.push(Span::raw(" ".repeat(from - cursor)));
+        }
         let mut style = Style::default()
             .bg(CLIP_COLORS[i % CLIP_COLORS.len()])
             .fg(Color::Black);
@@ -100,36 +195,44 @@ fn draw_timeline(f: &mut Frame, app: &App, area: Rect) {
             .file_stem()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let w = *w as usize;
-        let text = truncate(&format!("{i}:{name}"), w);
+        let fade = if clip.transition.is_some() { "⤬" } else { "" };
+        let text = truncate(&format!("{fade}{i}:{name}"), w);
         lane.push(Span::styled(format!("{text:^w$}"), style));
-        labels.push(Span::raw(truncate(
-            &format!("{:^w$}", clip.len().to_string()),
-            w,
-        )));
+        labels.push(Span::styled(
+            truncate(&format!("{:^w$}", clip.len().to_string()), w),
+            Style::default().fg(Color::DarkGray),
+        ));
+        cursor = to;
     }
+    lines.push(Line::from(lane));
+    lines.push(Line::from(labels));
 
-    let lines = vec![
-        Line::raw(ruler.clone()),
-        Line::from(lane),
-        Line::from(labels),
-        Line::raw(ruler.replace('▼', "▲")),
-    ];
+    // Bottom playhead marker.
+    let mut bottom = vec![' '; width as usize];
+    bottom[playhead_col] = '▲';
+    lines.push(Line::styled(
+        bottom.into_iter().collect::<String>(),
+        Style::default().fg(Color::Cyan),
+    ));
+
     f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_details(f: &mut Frame, app: &App, area: Rect) {
-    let block = Block::default().borders(Borders::ALL).title(" clip ");
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let outer = block("clip");
+    let inner = outer.inner(area);
+    f.render_widget(outer, area);
 
-    let mut lines = vec![Line::raw(format!(
-        "playhead  {}  ",
-        app.playhead
-    ))];
+    let mut lines = vec![Line::from(vec![
+        Span::styled("playhead  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(app.playhead.to_string(), Style::default().fg(Color::Cyan)),
+    ])];
     if let Some((index, src_time)) = app.source_time() {
-        let clip = &app.project.clips[index];
-        lines[0].push_span(Span::raw(format!("→ clip {index} @ source {src_time}")));
+        let clip = &app.project.main().clips[index];
+        lines[0].push_span(Span::styled(
+            format!("  →  clip {index} @ source {src_time}"),
+            Style::default().fg(Color::DarkGray),
+        ));
         lines.push(Line::raw(format!("src       {}", clip.src.display())));
         lines.push(Line::raw(format!(
             "range     [{} .. {}]  len {}",
@@ -138,45 +241,54 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
             clip.len()
         )));
         let start = app.project.positions()[index];
-        lines.push(Line::raw(format!(
-            "timeline  starts {}  ends {}",
-            start,
-            start + clip.len()
-        )));
+        let mut extra = format!("timeline  starts {}  ends {}", start, start + clip.len());
+        if let Some(t) = clip.transition {
+            extra.push_str(&format!("  crossfade {t}"));
+        }
+        if !clip.effects.is_empty() {
+            extra.push_str(&format!("  fx {}", clip.effects.join(", ")));
+        }
+        lines.push(Line::raw(extra));
     } else {
-        lines.push(Line::raw("nothing under playhead"));
+        lines.push(Line::styled(
+            "nothing under playhead",
+            Style::default().fg(Color::DarkGray),
+        ));
     }
     f.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
-    let text = if app.message.is_empty() {
-        "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  P preview  r render  ? help  q quit"
+    let widget = if app.message.is_empty() {
+        Paragraph::new(
+            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  P preview  r render  ? help  q quit",
+        )
+        .style(Style::default().fg(Color::DarkGray))
     } else {
-        &app.message
+        Paragraph::new(app.message.as_str()).style(Style::default().fg(Color::Yellow))
     };
-    f.render_widget(
-        Paragraph::new(text).style(Style::default().add_modifier(Modifier::DIM)),
-        area,
-    );
+    f.render_widget(widget, area);
 }
 
 fn draw_help(f: &mut Frame) {
-    let area = centered(60, 16, f.area());
-    let text = "\
+    let area = centered(62, 17, f.area());
+    let text = "
   playhead   h/l ±0.1s   H/L ±1s   j/k clip edges
   edit       s split   d delete   i trim start   o trim end
              </> move clip   u undo   U redo
   view       space play clip (mpv)   P preview timeline
   project    w save   r render   q quit
 
-  The playhead selects: verbs act on the clip under it.
-  Trims move the clip's SOURCE in/out to the playhead.
+  The playhead selects: verbs act on the main-track clip
+  under it. Trims move the clip's SOURCE in/out points.
+  Overlay tracks, titles, multicam and transcripts are
+  driven from the CLI/MCP: track, title, angle, take,
+  transcribe, cut-text.
 
-                any key to close";
+                  any key to close";
     f.render_widget(Clear, area);
     f.render_widget(
-        Paragraph::new(text).block(Block::default().borders(Borders::ALL).title(" help ")),
+        Paragraph::new(text).block(block("help")).fg(Color::White),
         area,
     );
 }
@@ -201,29 +313,41 @@ mod tests {
     use crate::app::App;
     use ratatui::backend::TestBackend;
     use ratatui::Terminal;
-    use viode_core::{Clip, Project, Time, PROJECT_FILE};
+    use viode_core::{Clip, Project, Time, Title, Track, PROJECT_FILE};
 
     #[test]
-    fn renders_without_panicking_and_shows_clips() {
+    fn renders_multitrack_without_panicking() {
         let dir = std::env::temp_dir().join(format!("viode-ui-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join(PROJECT_FILE);
         let mut project = Project::new("uidemo", 30.0, [640, 360]);
         let t = |s| Time::from_secs_f64(s).unwrap();
-        project.clips.push(Clip {
-            src: "media/interview.mp4".into(),
-            in_: t(0.0),
-            out: t(2.0),
-            label: None,
+        project
+            .main_mut()
+            .clips
+            .push(Clip::media("media/interview.mp4".into(), t(0.0), t(2.0)));
+
+        let mut broll = Track::new("broll", TrackKind::Video);
+        let mut over = Clip::media("media/drone.mp4".into(), t(0.0), t(1.0));
+        over.at = Some(t(0.5));
+        broll.clips.push(over);
+        project.tracks.push(broll);
+        project.titles.push(Title {
+            text: "Intro".into(),
+            at: t(0.2),
+            dur: t(1.0),
+            font: None,
         });
         project.save(&file).unwrap();
         let app = App::open(&file).unwrap();
 
-        let mut terminal = Terminal::new(TestBackend::new(100, 24)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(100, 28)).unwrap();
         terminal.draw(|f| draw(f, &app)).unwrap();
 
         let content = format!("{:?}", terminal.backend().buffer());
         assert!(content.contains("uidemo"), "header shows project name");
-        assert!(content.contains("interview"), "timeline shows clip name");
+        assert!(content.contains("interview"), "main lane shows clip name");
+        assert!(content.contains("broll"), "overlay lane shows track name");
+        assert!(content.contains("Intro"), "title lane shows title text");
     }
 }

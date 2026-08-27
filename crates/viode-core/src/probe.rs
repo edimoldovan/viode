@@ -5,7 +5,7 @@ use std::process::Command;
 
 use crate::time::Time;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MediaInfo {
     pub duration: Time,
     pub width: Option<u32>,
@@ -67,6 +67,45 @@ pub fn probe(path: &Path) -> Result<MediaInfo, ProbeError> {
                 info.audio_codec = stream["codec_name"].as_str().map(String::from);
             }
             _ => {}
+        }
+    }
+    Ok(info)
+}
+
+/// Cache key: path + size + mtime — any change to the file invalidates it.
+fn cache_key(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some(format!("{}|{}|{}", path.display(), meta.len(), mtime))
+}
+
+/// Like `probe`, but memoized in `<project_dir>/cache/probe.json`. On
+/// 3-hour files ffprobe isn't free, and add/take/sync hit the same sources
+/// repeatedly.
+pub fn probe_cached(project_dir: &Path, path: &Path) -> Result<MediaInfo, ProbeError> {
+    let cache_path = project_dir.join("cache").join("probe.json");
+    let mut cache: std::collections::HashMap<String, MediaInfo> = std::fs::read_to_string(&cache_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let key = cache_key(path);
+    if let Some(k) = &key {
+        if let Some(hit) = cache.get(k) {
+            return Ok(hit.clone());
+        }
+    }
+    let info = probe(path)?;
+    if let Some(k) = key {
+        cache.insert(k, info.clone());
+        if let Ok(json) = serde_json::to_string(&cache) {
+            let _ = std::fs::create_dir_all(project_dir.join("cache"));
+            let _ = std::fs::write(&cache_path, json);
         }
     }
     Ok(info)

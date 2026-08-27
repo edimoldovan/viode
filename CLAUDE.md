@@ -48,8 +48,27 @@ Playhead selects — verbs act on the clip under it. Proxies are used for
 playback/preview when built. State machine (`app.rs`) is fully
 unit-tested; rendering (`ui.rs`) smoke-tested via TestBackend.
 
-Next: **Phase 5 — the Premiere fight** (multi-track, multicam,
-transcript-driven editing, effects/titles; see PLAN.md).
+**Phase 5 (the Premiere fight) — done.**
+
+- Multi-track model: track 0 = gapless main sequence (positions derived,
+  optional per-clip `transition` crossfade); overlay tracks position clips
+  with `at`; `TrackKind` av/video/audio; `enabled` flag; project-level
+  titles. Legacy `[[clip]]` files migrate on load. Edit ops now take
+  `&mut Track`; timeline queries take `&Project`.
+- GES backend: one layer per enabled track (titles on top), auto
+  transitions, `ges::Effect` per clip, `TitleClip` with child props.
+  Smart-copy refuses non-cut-only projects.
+- Multicam: `sync.rs` audio cross-correlation (10 Hz coarse + 100 Hz
+  refine); `viode angle` adds a synced disabled track; `viode take` /
+  `ops::replace_range` swaps a timeline range with angle footage.
+- Transcripts: `transcript.rs` shells to whisper.cpp (skip-gated),
+  `viode transcribe` / `cut-text` = edit video by editing text.
+- Performance: `probe_cached` (mtime-keyed), `scripts/bench-longform.sh`
+  (5-min footage: ops ~3ms, silence scan 0.8s, proxy ~60x realtime).
+- TUI: lanes for every track + title markers, theme-inherited ANSI colors,
+  rounded borders; edit grammar still drives the main track.
+
+All phases complete. Next: polish, packaging (AUR), real-footage dogfooding.
 
 ## Stack decisions (settled — don't relitigate casually)
 

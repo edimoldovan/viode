@@ -147,7 +147,7 @@ fn full_edit_workflow() {
 
     // 7. The project file stays human-readable after all of that.
     let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
-    assert!(toml.contains("[[clip]]"), "unexpected project file:\n{toml}");
+    assert!(toml.contains("[[track.clip]]"), "unexpected project file:\n{toml}");
 
     // 8. Error paths speak clearly and exit non-zero.
     viode(&proj)
@@ -391,6 +391,163 @@ fn render_presets_finish_the_master() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("unknown preset"));
+}
+
+/// Noise with a fixed seed is reproducible — two "recordings" of the same
+/// event. The angle has 1s of silence first, so it "started 1s early".
+fn make_noise_clip(path: &Path, lead_silence: f64, noise_dur: f64) {
+    let total = lead_silence + noise_dur;
+    let status = Proc::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", &format!("anullsrc=r=44100:cl=mono:d={lead_silence}"),
+            "-f", "lavfi", "-i",
+            &format!("anoisesrc=color=pink:seed=7:d={noise_dur}:r=44100"),
+            "-f", "lavfi", "-i", &format!("testsrc2=duration={total}:size=320x180:rate=30"),
+            "-filter_complex", "[0][1]concat=n=2:v=0:a=1[a]",
+            "-map", "2:v", "-map", "[a]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            "-c:a", "aac", "-shortest",
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[test]
+fn multitrack_titles_fades_and_effects() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP multitrack_titles_fades_and_effects: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "mt", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("mt");
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    make_clip(&tmp.path().join("b.mp4"), 1.0);
+
+    // Main sequence with a crossfade.
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+    viode(&proj).args(["add", "../b.mp4"]).assert().success();
+    viode(&proj)
+        .args(["fade", "1", "0.5"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("crossfade: 00:00:00.500"));
+    // 2 + 1 - 0.5 overlap = 2.5s.
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:02.500"));
+
+    // Overlay track with positioned B-roll; effects; a title.
+    viode(&proj)
+        .args(["track", "add", "broll", "--kind", "video"])
+        .assert()
+        .success();
+    viode(&proj)
+        .args(["add", "../b.mp4", "--track", "1", "--at", "0.5"])
+        .assert()
+        .success();
+    viode(&proj)
+        .args(["add", "../b.mp4", "--track", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--at"));
+    viode(&proj)
+        .args(["fx", "0", "videobalance saturation=0.0"])
+        .assert()
+        .success();
+    viode(&proj)
+        .args(["title", "Chapter One", "--at", "0.2", "--dur", "1.0"])
+        .assert()
+        .success();
+
+    // The file records all of it, in the documented format.
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    for needle in [
+        "[[track]]",
+        "transition = \"00:00:00.500\"",
+        "kind = \"video\"",
+        "at = \"00:00:00.500\"",
+        "videobalance saturation=0.0",
+        "[[title]]",
+        "Chapter One",
+    ] {
+        assert!(toml.contains(needle), "missing {needle} in:\n{toml}");
+    }
+
+    // Smart-copy refuses compositing projects instead of producing garbage.
+    viode(&proj)
+        .args(["render", "--smart"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("single-track"));
+
+    // Disabled tracks are honored (and the main track can't be disabled).
+    viode(&proj).args(["track", "off", "1"]).assert().success();
+    viode(&proj)
+        .args(["track", "off", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("main track"));
+
+    if ges_available() {
+        // The composited render (overlay re-enabled) comes out the right length.
+        viode(&proj).args(["track", "on", "1"]).assert().success();
+        viode(&proj).arg("render").assert().success();
+        let dur = probe_duration(&proj.join("renders/mt.mp4"));
+        assert!((dur - 2.5).abs() < 0.2, "expected ~2.5s, got {dur}s");
+    } else {
+        eprintln!("SKIP multitrack render check: GES not installed");
+    }
+}
+
+#[test]
+fn multicam_sync_and_take() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP multicam_sync_and_take: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    // Reference: noise from t=0. Angle: same noise, but its recorder ran 1s
+    // of silence first — it started 1 second "early".
+    make_noise_clip(&tmp.path().join("ref.mp4"), 0.0, 3.0);
+    make_noise_clip(&tmp.path().join("cam2.mp4"), 1.0, 2.0);
+
+    // Standalone offset detection.
+    let assert = viode(tmp.path())
+        .args(["sync", "ref.mp4", "cam2.mp4", "--max-lag", "5"])
+        .assert()
+        .success();
+    let out = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let offset: f64 = out.split('s').next().unwrap().trim().parse().unwrap();
+    assert!(
+        (offset - (-1.0)).abs() < 0.15,
+        "expected ~-1.0s offset, got {offset} ({out})"
+    );
+
+    // Full multicam flow: angle lands synced and disabled; take swaps it in.
+    viode(tmp.path()).args(["new", "mc"]).assert().success();
+    let proj = tmp.path().join("mc");
+    viode(&proj).args(["add", "../ref.mp4"]).assert().success();
+    viode(&proj)
+        .args(["angle", "../cam2.mp4"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("synced"));
+
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    assert!(toml.contains("enabled = false"), "angle starts disabled:\n{toml}");
+    // Started early -> aligned by skipping its head (~1s in-point).
+    assert!(toml.contains("in = \"00:00:0"), "angle has an in-point:\n{toml}");
+
+    viode(&proj).args(["take", "1", "0.5", "1.5"]).assert().success();
+    let assert = viode(&proj).arg("ls").assert().success();
+    let ls = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    assert!(ls.contains("cam2.mp4"), "take put angle footage on main:\n{ls}");
+    assert!(ls.contains("total 00:00:03.000"), "takes keep duration:\n{ls}");
 }
 
 #[test]
