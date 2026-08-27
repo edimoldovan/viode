@@ -60,6 +60,40 @@ enum Cmd {
     Move { from: usize, to: usize },
     /// Remove a clip from the timeline
     Rm { index: usize },
+    /// List silent stretches in a clip's source audio
+    Silences {
+        index: usize,
+        /// Silence threshold in dB (more negative = stricter)
+        #[arg(long, default_value_t = -35.0)]
+        threshold: f64,
+        /// Minimum silence duration in seconds
+        #[arg(long, default_value_t = 0.5)]
+        min: f64,
+    },
+    /// Cut silent stretches out of a clip (the podcast dead-air remover)
+    CutSilences {
+        index: usize,
+        #[arg(long, default_value_t = -35.0)]
+        threshold: f64,
+        #[arg(long, default_value_t = 0.5)]
+        min: f64,
+        /// Seconds of silence to keep at each cut, for natural pacing
+        #[arg(long, default_value_t = 0.15)]
+        pad: f64,
+    },
+    /// List scene changes in a clip's source video
+    Scenes {
+        index: usize,
+        /// Scene score threshold 0.0-1.0 (lower finds more cuts)
+        #[arg(long, default_value_t = 0.4)]
+        threshold: f64,
+    },
+    /// Split a clip at every scene change
+    SplitScenes {
+        index: usize,
+        #[arg(long, default_value_t = 0.4)]
+        threshold: f64,
+    },
     /// Run the MCP server (stdio) — lets AI clients edit the project
     Serve {
         /// Speak the Model Context Protocol on stdin/stdout
@@ -109,6 +143,22 @@ fn run() -> Result<()> {
             println!("removed [{}] {}", index, clip.src.display());
             Ok(())
         }),
+        Cmd::Silences { index, threshold, min } => {
+            cmd_silences(&cli.project, index, threshold, min)
+        }
+        Cmd::CutSilences { index, threshold, min, pad } => {
+            cmd_cut_silences(&cli.project, index, threshold, min, pad)
+        }
+        Cmd::Scenes { index, threshold } => cmd_scenes(&cli.project, index, threshold),
+        Cmd::SplitScenes { index, threshold } => {
+            with_project(&cli.project, |p| {
+                let src = clip_source(&cli.project, p, index)?;
+                let scenes = viode_core::detect_scenes(&src, threshold)?;
+                let n = ops::split_at_source_times(p, index, &scenes)?;
+                println!("split clip {index} into {n} segments at {} scene changes", scenes.len());
+                Ok(())
+            })
+        }
         Cmd::Render { output, smart } => cmd_render(&cli.project, output, smart),
         Cmd::Serve { mcp } => {
             if !mcp {
@@ -271,6 +321,81 @@ fn cmd_ls(project_file: &Path) -> Result<()> {
         );
     }
     println!("total {}", project.total_duration());
+    Ok(())
+}
+
+/// Absolute path to a clip's source file, with a range check.
+fn clip_source(project_file: &Path, project: &Project, index: usize) -> Result<PathBuf> {
+    let clip = project
+        .clips
+        .get(index)
+        .with_context(|| format!("clip index {index} out of range"))?;
+    Ok(project_dir(project_file).join(&clip.src))
+}
+
+fn cmd_silences(project_file: &Path, index: usize, threshold: f64, min: f64) -> Result<()> {
+    let project = Project::load(project_file)?;
+    let src = clip_source(project_file, &project, index)?;
+    let clip = &project.clips[index];
+    let silences = viode_core::detect_silences(&src, threshold, min)?;
+    let in_clip: Vec<_> = silences
+        .iter()
+        .filter(|(s, e)| *e > clip.in_ && *s < clip.out)
+        .collect();
+    if in_clip.is_empty() {
+        println!("no silences ≥ {min}s below {threshold} dB in clip {index}");
+        return Ok(());
+    }
+    println!("{:<13} {:<13} len", "start", "end");
+    for (s, e) in &in_clip {
+        println!("{:<13} {:<13} {}", s.to_string(), e.to_string(), *e - *s);
+    }
+    println!("{} silences (source time within clip [{}..{}])", in_clip.len(), clip.in_, clip.out);
+    Ok(())
+}
+
+fn cmd_cut_silences(
+    project_file: &Path,
+    index: usize,
+    threshold: f64,
+    min: f64,
+    pad: f64,
+) -> Result<()> {
+    let mut project = Project::load(project_file)?;
+    let src = clip_source(project_file, &project, index)?;
+    let silences = viode_core::detect_silences(&src, threshold, min)?;
+    if silences.is_empty() {
+        println!("no silences to cut");
+        return Ok(());
+    }
+    let stats = ops::remove_source_ranges(
+        &mut project,
+        index,
+        &silences,
+        Time::from_secs_f64(pad)?,
+    )?;
+    project.save(project_file)?;
+    println!(
+        "cut {} of silence from clip {index} ({} segments kept, timeline now {})",
+        stats.removed,
+        stats.segments_kept,
+        project.total_duration()
+    );
+    Ok(())
+}
+
+fn cmd_scenes(project_file: &Path, index: usize, threshold: f64) -> Result<()> {
+    let project = Project::load(project_file)?;
+    let src = clip_source(project_file, &project, index)?;
+    let scenes = viode_core::detect_scenes(&src, threshold)?;
+    if scenes.is_empty() {
+        println!("no scene changes above {threshold} in clip {index}");
+        return Ok(());
+    }
+    for t in &scenes {
+        println!("{t}");
+    }
+    println!("{} scene changes (source time)", scenes.len());
     Ok(())
 }
 

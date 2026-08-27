@@ -185,6 +185,102 @@ fn add_rejects_out_beyond_source_duration() {
         .stderr(predicate::str::contains("beyond source duration"));
 }
 
+/// A clip whose audio is: tone 0-1s, silence 1-2s, tone 2-3s.
+fn make_clip_with_silence(path: &Path) {
+    let status = Proc::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=duration=3:size=320x180:rate=30",
+            "-f", "lavfi", "-i",
+            "aevalsrc=if(between(t\\,1\\,2)\\,0\\,0.5*sin(440*2*PI*t)):d=3",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            "-c:a", "aac", "-shortest",
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+/// A clip that hard-cuts from a test pattern to SMPTE bars at 1s.
+fn make_clip_with_scene_change(path: &Path) {
+    let status = Proc::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "testsrc2=duration=1:size=320x180:rate=30",
+            "-f", "lavfi", "-i", "smptebars=duration=1:size=320x180:rate=30",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1[v]",
+            "-map", "[v]",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+#[test]
+fn silence_detection_and_cutting() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP silence_detection_and_cutting: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "pod"]).assert().success();
+    let proj = tmp.path().join("pod");
+    make_clip_with_silence(&tmp.path().join("talk.mp4"));
+    viode(&proj).args(["add", "../talk.mp4"]).assert().success();
+
+    // The 1s gap in the middle is found...
+    viode(&proj)
+        .args(["silences", "0", "--min", "0.5"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("1 silences"));
+
+    // ...and cut, with padding: ~0.7s removed (1s minus 2 x 0.15 pad),
+    // leaving two segments and a shorter timeline.
+    viode(&proj)
+        .args(["cut-silences", "0", "--min", "0.5"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 segments kept"));
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:02.3"));
+}
+
+#[test]
+fn scene_detection_and_splitting() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP scene_detection_and_splitting: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "footage"]).assert().success();
+    let proj = tmp.path().join("footage");
+    make_clip_with_scene_change(&tmp.path().join("raw.mp4"));
+    viode(&proj).args(["add", "../raw.mp4"]).assert().success();
+
+    // The pattern -> bars hard cut at ~1.0s registers as a scene change.
+    viode(&proj)
+        .args(["scenes", "0"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("00:00:01.0"));
+
+    viode(&proj)
+        .args(["split-scenes", "0"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 segments"));
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:02.000"));
+}
+
 #[test]
 fn render_produces_frame_accurate_output() {
     if !ffmpeg_available() || !ges_available() {

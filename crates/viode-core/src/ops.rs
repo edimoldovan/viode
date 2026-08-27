@@ -121,6 +121,107 @@ pub fn extract_range(project: &Project, start: Time, end: Time) -> Result<Projec
     Ok(out)
 }
 
+/// Split a clip at several SOURCE times (positions in the media file).
+/// Times outside the clip's (in, out) range are ignored. Returns the number
+/// of resulting segments.
+pub fn split_at_source_times(
+    project: &mut Project,
+    index: usize,
+    times: &[Time],
+) -> Result<usize, OpError> {
+    check_index(project, index)?;
+    let clip = project.clips[index].clone();
+
+    let mut cuts: Vec<Time> = times
+        .iter()
+        .copied()
+        .filter(|t| *t > clip.in_ && *t < clip.out)
+        .collect();
+    cuts.sort();
+    cuts.dedup();
+    if cuts.is_empty() {
+        return Ok(1);
+    }
+
+    let mut segments = Vec::with_capacity(cuts.len() + 1);
+    let mut prev = clip.in_;
+    for cut in cuts.iter().chain(std::iter::once(&clip.out)) {
+        let mut seg = clip.clone();
+        seg.in_ = prev;
+        seg.out = *cut;
+        segments.push(seg);
+        prev = *cut;
+    }
+    let count = segments.len();
+    project.clips.splice(index..=index, segments);
+    Ok(count)
+}
+
+/// What `remove_source_ranges` did, for reporting.
+#[derive(Debug, PartialEq)]
+pub struct RemovedRanges {
+    pub segments_kept: usize,
+    pub removed: Time,
+}
+
+/// Remove SOURCE-time ranges (e.g. detected silences) from a clip, replacing
+/// it with the segments in between. `pad` keeps that much of each range's
+/// edges, so cuts don't clip the last syllable before a pause.
+pub fn remove_source_ranges(
+    project: &mut Project,
+    index: usize,
+    ranges: &[(Time, Time)],
+    pad: Time,
+) -> Result<RemovedRanges, OpError> {
+    check_index(project, index)?;
+    let clip = project.clips[index].clone();
+
+    // Clamp to the clip, apply padding, drop ranges the padding consumed,
+    // then merge overlaps so segment math below is simple.
+    let mut cuts: Vec<(Time, Time)> = ranges
+        .iter()
+        .map(|&(s, e)| (s.max(clip.in_) + pad, (e.min(clip.out)) - pad))
+        .filter(|&(s, e)| s < e)
+        .collect();
+    cuts.sort();
+    let mut merged: Vec<(Time, Time)> = Vec::with_capacity(cuts.len());
+    for (s, e) in cuts.drain(..) {
+        match merged.last_mut() {
+            Some(last) if s <= last.1 => last.1 = last.1.max(e),
+            _ => merged.push((s, e)),
+        }
+    }
+
+    let mut segments = Vec::new();
+    let mut cursor = clip.in_;
+    for (s, e) in &merged {
+        if *s > cursor {
+            let mut seg = clip.clone();
+            seg.in_ = cursor;
+            seg.out = *s;
+            segments.push(seg);
+        }
+        cursor = cursor.max(*e);
+    }
+    if cursor < clip.out {
+        let mut seg = clip.clone();
+        seg.in_ = cursor;
+        seg.out = clip.out;
+        segments.push(seg);
+    }
+
+    if segments.is_empty() {
+        // Refuse to silently delete the whole clip — that's `rm`'s job.
+        return Err(OpError::BadSplit(pad, clip.len()));
+    }
+
+    let kept: Time = segments.iter().fold(Time::ZERO, |acc, s| acc + s.len());
+    let removed = clip.len() - kept;
+    let segments_kept = segments.len();
+    project.clips.splice(index..=index, segments);
+    Ok(RemovedRanges { segments_kept, removed })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +313,57 @@ mod tests {
 
         assert!(extract_range(&p, t(4.0), t(2.0)).is_err());
         assert!(extract_range(&p, t(0.0), t(99.0)).is_err());
+    }
+
+    #[test]
+    fn split_at_source_times_ignores_out_of_range_cuts() {
+        let mut p = project(); // clip 0 = [0..3]
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        // 0.0 and 3.0 are boundaries (no-ops); 99 is outside; 1.0/2.0 are real.
+        let n = split_at_source_times(&mut p, 0, &[t(2.0), t(0.0), t(1.0), t(3.0), t(99.0)])
+            .unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(p.clips.len(), 4); // 3 segments + the untouched clip 1
+        assert_eq!(p.clips[0].out, t(1.0));
+        assert_eq!(p.clips[1].in_, t(1.0));
+        assert_eq!(p.clips[2].out, t(3.0));
+        assert_eq!(p.total_duration(), t(6.0), "splitting never changes duration");
+    }
+
+    #[test]
+    fn remove_source_ranges_cuts_middle_and_keeps_padding() {
+        let mut p = project(); // clip 0 = [0..3]
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        // Remove silence at 1.0..2.0, keeping 0.1s padding on each side.
+        let stats =
+            remove_source_ranges(&mut p, 0, &[(t(1.0), t(2.0))], t(0.1)).unwrap();
+        assert_eq!(stats.segments_kept, 2);
+        assert_eq!(stats.removed, t(0.8)); // 1.0s minus 2 x 0.1 pad
+        assert_eq!(p.clips[0].out, t(1.1));
+        assert_eq!(p.clips[1].in_, t(1.9));
+    }
+
+    #[test]
+    fn remove_source_ranges_merges_overlaps_and_clamps() {
+        let mut p = project();
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        // Overlapping + out-of-clip ranges collapse into one cut 0.5..2.5.
+        let stats = remove_source_ranges(
+            &mut p,
+            0,
+            &[(t(0.5), t(1.5)), (t(1.0), t(2.5)), (t(90.0), t(99.0))],
+            Time::ZERO,
+        )
+        .unwrap();
+        assert_eq!(stats.segments_kept, 2);
+        assert_eq!(stats.removed, t(2.0));
+    }
+
+    #[test]
+    fn remove_source_ranges_refuses_to_delete_everything() {
+        let mut p = project();
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        assert!(remove_source_ranges(&mut p, 0, &[(t(0.0), t(3.0))], Time::ZERO).is_err());
     }
 }
 

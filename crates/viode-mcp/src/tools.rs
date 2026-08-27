@@ -113,6 +113,46 @@ pub fn definitions() -> Vec<Value> {
             &["start", "end"],
         ),
         tool(
+            "silence_detect",
+            "Find silent stretches in a clip's source audio (source-time ranges).",
+            json!({
+                "index": {"type": "integer"},
+                "threshold_db": {"type": "number", "default": -35.0},
+                "min_duration": {"type": "number", "default": 0.5, "description": "seconds"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "silence_cut",
+            "Cut all silent stretches out of a clip — the podcast dead-air \
+             remover. pad keeps a little silence at each cut for pacing.",
+            json!({
+                "index": {"type": "integer"},
+                "threshold_db": {"type": "number", "default": -35.0},
+                "min_duration": {"type": "number", "default": 0.5},
+                "pad": {"type": "number", "default": 0.15, "description": "seconds kept at each edge"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "scene_detect",
+            "Find scene changes in a clip's source video (source times).",
+            json!({
+                "index": {"type": "integer"},
+                "threshold": {"type": "number", "default": 0.4, "description": "0.0-1.0, lower = more cuts"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "scene_split",
+            "Split a clip at every scene change, for rough-cutting raw footage.",
+            json!({
+                "index": {"type": "integer"},
+                "threshold": {"type": "number", "default": 0.4},
+            }),
+            &["index"],
+        ),
+        tool(
             "render",
             "Render the full timeline (frame-accurate GES path).",
             json!({ "output": {"type": "string", "description": "defaults to renders/<name>.mp4"} }),
@@ -141,6 +181,10 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             ops::remove(p, index_arg(args, "index")?)?;
             Ok(())
         }),
+        "silence_detect" => silence_detect(server, args),
+        "silence_cut" => silence_cut(server, args),
+        "scene_detect" => scene_detect(server, args),
+        "scene_split" => scene_split(server, args),
         "frame_grab" => frame_grab(server, args),
         "render_preview" => render_preview(server, args),
         "render" => render(server, args),
@@ -323,6 +367,93 @@ fn clip_add(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     ops::add(&mut project, Clip { src: rel, in_, out, label: None })?;
     project.save(&file)?;
     timeline_get(server)
+}
+
+/// Clip source path + the clip itself, for analysis tools.
+fn clip_and_source(server: &Server, args: &Value) -> Result<(usize, Clip, PathBuf)> {
+    let (file, dir) = require_project(server)?;
+    let project = Project::load(&file)?;
+    let index = index_arg(args, "index")?;
+    let clip = project
+        .clips
+        .get(index)
+        .with_context(|| format!("clip index {index} out of range"))?
+        .clone();
+    let src = dir.join(&clip.src);
+    Ok((index, clip, src))
+}
+
+fn f64_arg(args: &Value, key: &str, default: f64) -> f64 {
+    args.get(key).and_then(Value::as_f64).unwrap_or(default)
+}
+
+fn silence_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let silences = viode_core::detect_silences(
+        &src,
+        f64_arg(args, "threshold_db", -35.0),
+        f64_arg(args, "min_duration", 0.5),
+    )?;
+    let in_clip: Vec<Value> = silences
+        .iter()
+        .filter(|(s, e)| *e > clip.in_ && *s < clip.out)
+        .map(|(s, e)| json!({"start": s.to_string(), "end": e.to_string(), "len": (*e - *s).to_string()}))
+        .collect();
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "clip": index,
+        "silences": in_clip,
+        "note": "source-time ranges; use silence_cut to remove them",
+    }))?))
+}
+
+fn silence_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, _, src) = clip_and_source(server, args)?;
+    let silences = viode_core::detect_silences(
+        &src,
+        f64_arg(args, "threshold_db", -35.0),
+        f64_arg(args, "min_duration", 0.5),
+    )?;
+    if silences.is_empty() {
+        return Ok(text("no silences found — nothing cut"));
+    }
+    let pad = Time::from_secs_f64(f64_arg(args, "pad", 0.15))?;
+    let (file, _) = require_project(server)?;
+    let mut project = Project::load(&file)?;
+    let stats = ops::remove_source_ranges(&mut project, index, &silences, pad)?;
+    project.save(&file)?;
+    let mut content = text(format!(
+        "cut {} of silence ({} segments kept)",
+        stats.removed, stats.segments_kept
+    ));
+    content.extend(timeline_get(server)?);
+    Ok(content)
+}
+
+fn scene_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let scenes = viode_core::detect_scenes(&src, f64_arg(args, "threshold", 0.4))?;
+    let in_clip: Vec<String> = scenes
+        .iter()
+        .filter(|t| **t > clip.in_ && **t < clip.out)
+        .map(Time::to_string)
+        .collect();
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "clip": index,
+        "scene_changes": in_clip,
+        "note": "source times; use scene_split to cut at them",
+    }))?))
+}
+
+fn scene_split(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, _, src) = clip_and_source(server, args)?;
+    let scenes = viode_core::detect_scenes(&src, f64_arg(args, "threshold", 0.4))?;
+    let (file, _) = require_project(server)?;
+    let mut project = Project::load(&file)?;
+    let n = ops::split_at_source_times(&mut project, index, &scenes)?;
+    project.save(&file)?;
+    let mut content = text(format!("split clip {index} into {n} segments"));
+    content.extend(timeline_get(server)?);
+    Ok(content)
 }
 
 fn frame_grab(server: &Server, args: &Value) -> Result<Vec<Value>> {

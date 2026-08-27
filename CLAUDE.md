@@ -25,8 +25,16 @@ decisions.
 North star (see PLAN.md): a Premiere successor — the bar is a 3-hour
 multicam podcast edit. Judge designs against that, not the demo clips.
 
-Next: **Phase 3 — senses & speed** (proxies, thumbnails, waveforms,
-audio_levels, silence cutting, scene detection, export presets).
+**Phase 3 (senses & speed) — in progress.** Done: silence detection +
+auto-cutting (`viode silences` / `cut-silences`, MCP `silence_detect` /
+`silence_cut`) and scene detection + splitting (`viode scenes` /
+`split-scenes`, MCP `scene_detect` / `scene_split`) — analysis in
+`viode-core/src/audio.rs` (ffmpeg silencedetect/scene-score, results in
+SOURCE time), applied by pure ops `remove_source_ranges` (with padding,
+overlap-merge) and `split_at_source_times`.
+
+Still to do in Phase 3: proxies, thumbnails, waveforms, loudness-normalized
+export presets (YouTube/Shorts/podcast).
 
 ## Stack decisions (settled — don't relitigate casually)
 
