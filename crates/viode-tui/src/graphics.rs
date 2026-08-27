@@ -56,7 +56,7 @@ pub fn encode_png_at(data: &[u8], id: u32, cols: u16, rows: u16) -> Vec<u8> {
     for (k, chunk) in chunks.iter().enumerate() {
         let more = u8::from(k < last);
         if k == 0 {
-            write!(out, "\x1b_Ga=T,f=100,q=2,i={id},c={cols},r={rows},m={more};").unwrap();
+            write!(out, "\x1b_Ga=T,f=100,q=2,z=-1,i={id},c={cols},r={rows},m={more};").unwrap();
         } else {
             write!(out, "\x1b_Gq=2,m={more};").unwrap();
         }
@@ -85,7 +85,7 @@ mod tests {
     fn single_chunk_payload() {
         let seq = encode_png_at(b"tiny", 7, 12, 4);
         let s = String::from_utf8_lossy(&seq);
-        assert!(s.starts_with("\x1b_Ga=T,f=100,q=2,i=7,c=12,r=4,m=0;"));
+        assert!(s.starts_with("\x1b_Ga=T,f=100,q=2,z=-1,i=7,c=12,r=4,m=0;"));
         assert!(s.ends_with("\x1b\\"));
         assert_eq!(s.matches("\x1b_G").count(), 1);
     }

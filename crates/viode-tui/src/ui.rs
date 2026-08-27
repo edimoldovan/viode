@@ -36,10 +36,11 @@ pub fn draw(f: &mut Frame, app: &mut App) -> Vec<Placement> {
     let overlay_lanes = app.project.tracks.len().saturating_sub(1) as u16;
     let title_lane = u16::from(!app.project.titles.is_empty());
     let image_rows = if app.graphics { THUMB_ROWS + WAVE_ROWS } else { 0 };
-    let [header, timeline, details, status] = Layout::vertical([
+    let [header, timeline, details, _filler, status] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(6 + overlay_lanes + title_lane + image_rows),
-        Constraint::Min(3),
+        Constraint::Length(6),
+        Constraint::Min(0), // breathing room, not a giant empty box
         Constraint::Length(1),
     ])
     .areas(f.area());
@@ -201,7 +202,7 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
             if cols < 2 {
                 continue;
             }
-            if let Some(png) = app.thumb(i) {
+            if let Some(png) = app.strip(i, cols, THUMB_ROWS) {
                 placements.push(Placement {
                     png,
                     id: i as u32 + 1,
@@ -259,10 +260,10 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
             if cols < 2 {
                 continue;
             }
-            if let Some(png) = app.wave(i) {
+            if let Some(png) = app.wave(i, cols, WAVE_ROWS) {
                 placements.push(Placement {
                     png,
-                    id: i as u32 + 1001, // distinct id space from thumbs
+                    id: i as u32 + 1001, // distinct id space from strips
                     x: inner.x + from as u16,
                     y: wave_y,
                     cols,
@@ -440,17 +441,21 @@ mod tests {
         let mut app = App::open(&file).unwrap();
         app.graphics = true;
 
-        // Pretend the worker already produced both PNGs (same paths the
-        // cache computes: no proxy, so source = project_dir/media/a.mp4).
-        let src = dir.join("media/a.mp4");
-        for kind in [crate::media::Kind::Thumb, crate::media::Kind::Wave] {
-            let dest = app.media.dest_for(kind, &src, 0.0, 2.0);
-            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
-            std::fs::write(&dest, b"png").unwrap();
-        }
-
+        // First draw queues generation and reserves the rows.
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
         let mut placements = Vec::new();
+        terminal.draw(|f| placements = draw(f, &mut app)).unwrap();
+        assert!(placements.is_empty(), "nothing ready on the first frame");
+
+        // Stand in for the worker: create exactly the files the draw
+        // queued (one strip + one wave), then redraw.
+        let pending = app.media.pending();
+        assert_eq!(pending.len(), 2, "strip + wave queued: {pending:?}");
+        for dest in pending {
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(dest, b"png").unwrap();
+        }
+
         terminal.draw(|f| placements = draw(f, &mut app)).unwrap();
 
         assert_eq!(placements.len(), 2, "one thumb + one wave: {placements:?}");

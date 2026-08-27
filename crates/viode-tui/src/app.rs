@@ -70,30 +70,45 @@ impl App {
         })
     }
 
-    /// Thumbnail PNG for a main-track clip, if generated yet (proxy-aware).
-    pub fn thumb(&mut self, index: usize) -> Option<PathBuf> {
+    /// Approximate pixels per terminal cell (crisp enough for strips).
+    const CELL_PX_W: u32 = 10;
+    const CELL_PX_H: u32 = 20;
+
+    fn artifact(
+        &mut self,
+        index: usize,
+        kind: crate::media::Kind,
+        cols: u16,
+        rows: u16,
+    ) -> Option<PathBuf> {
         let clip = self.project.main().clips.get(index)?.clone();
         let src = viode_core::proxy_for(&self.project_dir, &clip.src)
             .unwrap_or_else(|| self.project_dir.join(&clip.src));
-        self.media.get(
-            crate::media::Kind::Thumb,
-            &src,
-            clip.in_.as_secs_f64(),
-            clip.out.as_secs_f64(),
-        )
+        let px_w = cols as u32 * Self::CELL_PX_W;
+        let px_h = rows as u32 * Self::CELL_PX_H;
+        // One 16:9 frame is about px_h * 16/9 wide; tile enough to fill.
+        let frame_w = (px_h * 16) / 9;
+        let frames = (px_w / frame_w.max(1)).max(1);
+        self.media.get(crate::media::Spec {
+            kind,
+            src,
+            in_s: clip.in_.as_secs_f64(),
+            out_s: clip.out.as_secs_f64(),
+            px_w,
+            px_h,
+            frames,
+        })
     }
 
-    /// Waveform PNG for a main-track clip, if generated yet.
-    pub fn wave(&mut self, index: usize) -> Option<PathBuf> {
-        let clip = self.project.main().clips.get(index)?.clone();
-        let src = viode_core::proxy_for(&self.project_dir, &clip.src)
-            .unwrap_or_else(|| self.project_dir.join(&clip.src));
-        self.media.get(
-            crate::media::Kind::Wave,
-            &src,
-            clip.in_.as_secs_f64(),
-            clip.out.as_secs_f64(),
-        )
+    /// Filmstrip PNG for a main-track clip sized for cols x rows cells,
+    /// if generated yet (proxy-aware).
+    pub fn strip(&mut self, index: usize, cols: u16, rows: u16) -> Option<PathBuf> {
+        self.artifact(index, crate::media::Kind::Strip, cols, rows)
+    }
+
+    /// Waveform PNG for a main-track clip sized for cols x rows cells.
+    pub fn wave(&mut self, index: usize, cols: u16, rows: u16) -> Option<PathBuf> {
+        self.artifact(index, crate::media::Kind::Wave, cols, rows)
     }
 
     /// Index of the clip under the playhead.
