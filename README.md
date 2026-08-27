@@ -1,10 +1,21 @@
 # Viode
 
-**A terminal-native, AI-native video editor for Linux.**
+**The mission: get Lex Fridman off macOS.**
+
+Ask anyone who's tried to leave Mac or Windows what's holding them back and
+you'll hear the same answer: *"I would, but I edit video."* Premiere,
+Final Cut, DaVinci — the last professional workloads with no serious home
+on Linux. Lex edits a 3-hour podcast; today that means Apple hardware and
+Adobe rent. The day he can cut an episode faster on Linux than on his Mac,
+that excuse dies for everyone.
+
+Viode is that editor: **terminal-native, AI-native, built for Linux.**
 
 The timeline is a text file. Every operation is a CLI verb. An AI can drive
 the whole editor over [MCP](https://modelcontextprotocol.io) — including
-*looking at* your footage. No Electron, no cloud, no subscription.
+*looking at* your footage. No Electron, no cloud, no subscription. Your
+edit is a git repo, your cuts are diffs, and "remove the dead air from
+this episode" is a sentence, not an afternoon.
 
 ```
 ┌─ demo * ── 1280x720 @ 30 fps ── 3 clips ── total 00:00:05.000 ─────────┐
@@ -26,11 +37,13 @@ Viode applies that to video:
 - **Every operation is a CLI verb.** Scriptable, cronable, pipeable.
 - **MCP is a first-class client.** Claude (or any MCP client) speaks the
   same protocol as the TUI: it can cut, trim, look at frames, read
-  waveforms, and render. "Remove the dead air from this episode" is a
-  sentence, not a session.
+  waveforms, and render. The AI isn't a plugin bolted onto a GUI — it's an
+  editor sitting next to you.
 
-North star: fill Adobe Premiere's footsteps — the acceptance test is a
-3-hour multicam podcast edit. See [PLAN.md](PLAN.md) for the full vision.
+The acceptance test is written down and non-negotiable: **Lex edits a
+3-hour multicam podcast in Viode, and it's *better* than his Mac setup.**
+Every design decision gets judged against that bar — "works on a 3-minute
+demo" is not done. See [PLAN.md](PLAN.md) for the full vision.
 
 ## Install
 
