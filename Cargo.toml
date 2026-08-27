@@ -1,0 +1,9 @@
+[package]
+name = "viode"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+gstreamer = "0.24.5"
+gstreamer-editing-services = "0.24.5"
+gstreamer-pbutils = "0.24.5"
