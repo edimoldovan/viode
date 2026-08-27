@@ -76,6 +76,54 @@ pub fn detect_scenes(path: &Path, threshold: f64) -> Result<Vec<Time>, AnalyzeEr
     Ok(scenes)
 }
 
+/// RMS loudness (dBFS) per `window` seconds — a coarse audio map the AI (or
+/// a waveform column) can reason about. Silence shows up near -100.
+pub fn audio_levels(path: &Path, window: f64) -> Result<Vec<(Time, f64)>, AnalyzeError> {
+    let samples_per_window = ((window * 8000.0).round() as u64).max(1);
+    let out = Command::new("ffmpeg")
+        .args(["-hide_banner", "-nostats", "-i"])
+        .arg(path)
+        .args([
+            "-af",
+            &format!(
+                "aresample=8000,asetnsamples=n={samples_per_window},\
+                 astats=metadata=1:reset=1,\
+                 ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-"
+            ),
+            "-f", "null", "-",
+        ])
+        .output()?;
+    if !out.status.success() {
+        return Err(AnalyzeError::Ffmpeg(
+            path.display().to_string(),
+            String::from_utf8_lossy(&out.stderr)
+                .lines()
+                .last()
+                .unwrap_or("unknown error")
+                .to_string(),
+        ));
+    }
+
+    // ametadata prints pairs of lines:
+    //   frame:0    pts:0      pts_time:0
+    //   lavfi.astats.Overall.RMS_level=-23.47
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut levels = Vec::new();
+    let mut at: Option<Time> = None;
+    for line in stdout.lines() {
+        if let Some(v) = value_after(line, "pts_time:") {
+            at = Time::from_secs_f64(v).ok();
+        } else if let Some(rest) = line.strip_prefix("lavfi.astats.Overall.RMS_level=") {
+            if let Some(t) = at.take() {
+                // "-inf" (digital silence) clamps to the practical floor.
+                let db = rest.trim().parse::<f64>().unwrap_or(-100.0).max(-100.0);
+                levels.push((t, db));
+            }
+        }
+    }
+    Ok(levels)
+}
+
 /// Run ffmpeg decoding `path` to the null muxer with the given filter args,
 /// returning stderr (where ffmpeg filters print their findings).
 fn run_null_render(path: &Path, filter_args: &[String]) -> Result<String, AnalyzeError> {

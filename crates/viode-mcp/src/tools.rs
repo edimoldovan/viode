@@ -153,9 +153,48 @@ pub fn definitions() -> Vec<Value> {
             &["index"],
         ),
         tool(
+            "proxy_build",
+            "Build 540p proxies for all timeline media. frame_grab and \
+             render_preview automatically use proxies once built — essential \
+             for long/high-res footage.",
+            json!({ "force": {"type": "boolean", "default": false} }),
+            &[],
+        ),
+        tool(
+            "audio_levels",
+            "RMS loudness (dBFS) per time window of a clip's source — a \
+             coarse audio map (silence ≈ -100).",
+            json!({
+                "index": {"type": "integer"},
+                "window": {"type": "number", "default": 0.5, "description": "seconds"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "waveform",
+            "A clip's audio waveform as an image.",
+            json!({ "index": {"type": "integer"} }),
+            &["index"],
+        ),
+        tool(
+            "thumbs",
+            "A clip's contact sheet (one frame per interval, tiled) as an \
+             image — survey footage without grabbing frames one by one.",
+            json!({
+                "index": {"type": "integer"},
+                "interval": {"type": "number", "default": 1.0, "description": "seconds between frames"},
+            }),
+            &["index"],
+        ),
+        tool(
             "render",
-            "Render the full timeline (frame-accurate GES path).",
-            json!({ "output": {"type": "string", "description": "defaults to renders/<name>.mp4"} }),
+            "Render the full timeline (frame-accurate GES path). Optional \
+             preset finishes it for a destination: youtube (16:9, -14 LUFS), \
+             shorts (1080x1920, -14 LUFS), podcast (audio-only m4a, -16 LUFS).",
+            json!({
+                "output": {"type": "string", "description": "defaults to renders/<name>.mp4"},
+                "preset": {"type": "string", "enum": ["youtube", "shorts", "podcast"]},
+            }),
             &[],
         ),
     ]
@@ -181,6 +220,10 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             ops::remove(p, index_arg(args, "index")?)?;
             Ok(())
         }),
+        "proxy_build" => proxy_build(server, args),
+        "audio_levels" => audio_levels_tool(server, args),
+        "waveform" => waveform_tool(server, args),
+        "thumbs" => thumbs_tool(server, args),
         "silence_detect" => silence_detect(server, args),
         "silence_cut" => silence_cut(server, args),
         "scene_detect" => scene_detect(server, args),
@@ -456,6 +499,81 @@ fn scene_split(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     Ok(content)
 }
 
+fn png_content(bytes: &[u8], caption: String) -> Vec<Value> {
+    vec![
+        json!({
+            "type": "image",
+            "data": base64::engine::general_purpose::STANDARD.encode(bytes),
+            "mimeType": "image/png",
+        }),
+        json!({ "type": "text", "text": caption }),
+    ]
+}
+
+fn proxy_build(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let project = Project::load(&file)?;
+    let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+    let mut sources: Vec<_> = project.clips.iter().map(|c| c.src.clone()).collect();
+    sources.sort();
+    sources.dedup();
+    let mut lines = Vec::new();
+    for src in &sources {
+        let dest = viode_core::build_proxy(&dir, src, force)?;
+        lines.push(format!("{} -> {}", src.display(), dest.display()));
+    }
+    if lines.is_empty() {
+        return Ok(text("timeline references no media"));
+    }
+    Ok(text(lines.join("\n")))
+}
+
+fn audio_levels_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let window = f64_arg(args, "window", 0.5);
+    let levels: Vec<Value> = viode_core::audio_levels(&src, window)?
+        .into_iter()
+        .filter(|(t, _)| *t >= clip.in_ && *t < clip.out)
+        .map(|(t, db)| json!({"at": t.to_string(), "rms_db": db}))
+        .collect();
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "clip": index,
+        "window_seconds": window,
+        "levels": levels,
+        "note": "source time; rms_db near -100 is silence",
+    }))?))
+}
+
+fn waveform_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    let dest = dir.join("cache").join(format!("waveform_{index}.png"));
+    viode_core::waveform_png(&src, clip.in_, clip.out, &dest, 1024, 160)?;
+    let bytes = std::fs::read(&dest)?;
+    Ok(png_content(
+        &bytes,
+        format!("waveform of clip {index} [{}..{}]", clip.in_, clip.out),
+    ))
+}
+
+fn thumbs_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    // Prefer the proxy: contact sheets decode the whole clip range.
+    let src = viode_core::proxy_for(&dir, &clip.src).unwrap_or(src);
+    let interval = f64_arg(args, "interval", 1.0);
+    let dest = dir.join("cache").join(format!("thumbs_{index}.png"));
+    viode_core::contact_sheet_png(&src, clip.in_, clip.out, &dest, interval, 5, 256)?;
+    let bytes = std::fs::read(&dest)?;
+    Ok(png_content(
+        &bytes,
+        format!(
+            "contact sheet of clip {index} [{}..{}], one frame per {interval}s, left-to-right",
+            clip.in_, clip.out
+        ),
+    ))
+}
+
 fn frame_grab(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (file, dir) = require_project(server)?;
     let project = Project::load(&file)?;
@@ -463,7 +581,9 @@ fn frame_grab(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (index, src_time) = ops::source_at(&project, at).with_context(|| {
         format!("{at} is past the end of the timeline ({})", project.total_duration())
     })?;
-    let src = dir.join(&project.clips[index].src);
+    // Proxy when available: same picture, far cheaper seek on big footage.
+    let src = viode_core::proxy_for(&dir, &project.clips[index].src)
+        .unwrap_or_else(|| dir.join(&project.clips[index].src));
 
     let out = Command::new("ffmpeg")
         .args(["-v", "error", "-ss", &src_time.as_secs_f64().to_string(), "-i"])
@@ -498,7 +618,14 @@ fn render_preview(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let project = Project::load(&file)?;
     let start = time_req(args, "start")?;
     let end = time_req(args, "end")?;
-    let sub = ops::extract_range(&project, start, end)?;
+    let mut sub = ops::extract_range(&project, start, end)?;
+
+    // Previews are for looking, not delivering: use proxies where built.
+    for clip in &mut sub.clips {
+        if let Some(proxy) = viode_core::proxy_for(&dir, &clip.src) {
+            clip.src = proxy;
+        }
+    }
 
     let output = dir.join("cache").join("preview.mp4");
     GesBackend.render(&sub, &dir, &output)?;
@@ -515,14 +642,44 @@ fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
     if project.clips.is_empty() {
         bail!("timeline is empty, nothing to render");
     }
-    let output = match args.get("output").and_then(Value::as_str) {
-        Some(o) => dir.join(o),
-        None => dir.join("renders").join(format!("{}.mp4", project.project.name)),
+    let name = &project.project.name;
+    let preset = match args.get("preset").and_then(Value::as_str) {
+        Some(p) => Some(
+            viode_core::Preset::parse(p)
+                .with_context(|| format!("unknown preset {p:?} (youtube, shorts, podcast)"))?,
+        ),
+        None => None,
     };
-    GesBackend.render(&project, &dir, &output)?;
+
+    let master = match preset {
+        Some(_) => dir.join("cache").join("master.mp4"),
+        None => match args.get("output").and_then(Value::as_str) {
+            Some(o) => dir.join(o),
+            None => dir.join("renders").join(format!("{name}.mp4")),
+        },
+    };
+    GesBackend.render(&project, &dir, &master)?;
+
+    let final_path = if let Some(preset) = preset {
+        let suffix = match preset {
+            viode_core::Preset::Youtube => "youtube",
+            viode_core::Preset::Shorts => "shorts",
+            viode_core::Preset::Podcast => "podcast",
+        };
+        let out = match args.get("output").and_then(Value::as_str) {
+            Some(o) => dir.join(o),
+            None => dir
+                .join("renders")
+                .join(format!("{name}-{suffix}.{}", preset.extension())),
+        };
+        viode_core::apply_preset(&master, &out, preset)?;
+        out
+    } else {
+        master
+    };
     Ok(text(format!(
         "rendered {} ({})",
-        output.display(),
+        final_path.display(),
         project.total_duration()
     )))
 }

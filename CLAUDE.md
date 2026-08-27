@@ -25,16 +25,22 @@ decisions.
 North star (see PLAN.md): a Premiere successor — the bar is a 3-hour
 multicam podcast edit. Judge designs against that, not the demo clips.
 
-**Phase 3 (senses & speed) — in progress.** Done: silence detection +
-auto-cutting (`viode silences` / `cut-silences`, MCP `silence_detect` /
-`silence_cut`) and scene detection + splitting (`viode scenes` /
-`split-scenes`, MCP `scene_detect` / `scene_split`) — analysis in
-`viode-core/src/audio.rs` (ffmpeg silencedetect/scene-score, results in
-SOURCE time), applied by pure ops `remove_source_ranges` (with padding,
-overlap-merge) and `split_at_source_times`.
+**Phase 3 (senses & speed) — done.**
 
-Still to do in Phase 3: proxies, thumbnails, waveforms, loudness-normalized
-export presets (YouTube/Shorts/podcast).
+- Silence detect/cut + scene detect/split (`audio.rs`, pure ops
+  `remove_source_ranges` / `split_at_source_times`; results in SOURCE time).
+- `audio_levels` — RMS dBFS per window (`viode levels`, MCP `audio_levels`).
+- Proxies (`proxy.rs`, 540p): `viode proxy`, MCP `proxy_build`; frame_grab,
+  render_preview, and thumbs automatically prefer proxies once built.
+- Waveform PNGs + contact sheets (`visual.rs`): `viode waveform/thumbs`,
+  MCP `waveform`/`thumbs` return them as image blocks.
+- Export presets (`export.rs`): `viode render --preset youtube|shorts|podcast`
+  — two-pass EBU R128 loudnorm (-14 LUFS video, -16 podcast), Shorts is
+  1080x1920 center-crop, podcast is audio-only m4a. Master renders via GES,
+  presets finish with ffmpeg.
+
+Next: **Phase 4 — the TUI** (ratatui timeline, vim-grammar keys, libmpv
+preview; see PLAN.md).
 
 ## Stack decisions (settled — don't relitigate casually)
 

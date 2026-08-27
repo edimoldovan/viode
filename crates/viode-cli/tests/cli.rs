@@ -282,6 +282,118 @@ fn scene_detection_and_splitting() {
 }
 
 #[test]
+fn proxies_waveforms_thumbs_and_levels() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP proxies_waveforms_thumbs_and_levels: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "senses"]).assert().success();
+    let proj = tmp.path().join("senses");
+    make_clip_with_silence(&tmp.path().join("talk.mp4"));
+    viode(&proj).args(["add", "../talk.mp4"]).assert().success();
+
+    // Proxy: built at <=540p under proxies/, named after the media file.
+    viode(&proj)
+        .arg("proxy")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("proxies/talk.mp4"));
+    let proxy = proj.join("proxies/talk.mp4");
+    assert!(proxy.exists());
+    // 320x180 source is already under 540p — proxy must not upscale.
+    let out = Proc::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v", "-show_entries", "stream=height", "-of", "csv=p=0"])
+        .arg(&proxy)
+        .output()
+        .unwrap();
+    let height: u32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    assert!(height <= 540, "proxy is {height}p, must be <= 540p");
+
+    // Second run skips existing proxies (no --force).
+    viode(&proj).arg("proxy").assert().success();
+
+    // Waveform + contact sheet come out as PNGs in cache/.
+    viode(&proj).args(["waveform", "0"]).assert().success();
+    viode(&proj).args(["thumbs", "0"]).assert().success();
+    for name in ["cache/waveform_0.png", "cache/thumbs_0.png"] {
+        let bytes = std::fs::read(proj.join(name)).unwrap();
+        assert_eq!(&bytes[..4], b"\x89PNG", "{name} is not a PNG");
+    }
+
+    // Levels: the 1-2s silent window reads far quieter than the tone.
+    let assert = viode(&proj)
+        .args(["levels", "0", "--window", "0.5"])
+        .assert()
+        .success();
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout).to_string();
+    let db_at = |prefix: &str| -> f64 {
+        stdout
+            .lines()
+            .find(|l| l.starts_with(prefix))
+            .unwrap_or_else(|| panic!("no window at {prefix} in:\n{stdout}"))
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let loud = db_at("00:00:00.500");
+    let quiet = db_at("00:00:01.500");
+    assert!(
+        quiet < loud - 30.0,
+        "silence ({quiet} dB) should be much quieter than tone ({loud} dB)"
+    );
+}
+
+#[test]
+fn render_presets_finish_the_master() {
+    if !ffmpeg_available() || !ges_available() {
+        eprintln!("SKIP render_presets_finish_the_master: ffmpeg/GES not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "ep", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("ep");
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+
+    // podcast: audio-only m4a.
+    viode(&proj)
+        .args(["render", "--preset", "podcast"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("podcast preset"));
+    let m4a = proj.join("renders/ep-podcast.m4a");
+    let out = Proc::new("ffprobe")
+        .args(["-v", "error", "-show_entries", "stream=codec_type", "-of", "csv=p=0"])
+        .arg(&m4a)
+        .output()
+        .unwrap();
+    let streams = String::from_utf8_lossy(&out.stdout);
+    assert!(streams.contains("audio") && !streams.contains("video"), "podcast export must be audio-only, got: {streams}");
+
+    // shorts: 1080x1920 vertical.
+    viode(&proj)
+        .args(["render", "--preset", "shorts"])
+        .assert()
+        .success();
+    let out = Proc::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "csv=p=0"])
+        .arg(proj.join("renders/ep-shorts.mp4"))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "1080,1920");
+
+    // Bad preset name fails helpfully.
+    viode(&proj)
+        .args(["render", "--preset", "tiktok"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unknown preset"));
+}
+
+#[test]
 fn render_produces_frame_accurate_output() {
     if !ffmpeg_available() || !ges_available() {
         eprintln!("SKIP render_produces_frame_accurate_output: ffmpeg/GES not installed");

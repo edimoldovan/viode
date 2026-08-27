@@ -60,6 +60,36 @@ enum Cmd {
     Move { from: usize, to: usize },
     /// Remove a clip from the timeline
     Rm { index: usize },
+    /// Build 540p proxies for all media (edit heavy footage smoothly)
+    Proxy {
+        /// Rebuild proxies that already exist
+        #[arg(long)]
+        force: bool,
+    },
+    /// Render a clip's audio waveform to a PNG in cache/
+    Waveform {
+        index: usize,
+        #[arg(long, default_value_t = 1024)]
+        width: u32,
+        #[arg(long, default_value_t = 160)]
+        height: u32,
+    },
+    /// Render a clip's contact sheet (tiled filmstrip) to a PNG in cache/
+    Thumbs {
+        index: usize,
+        /// Seconds between frames
+        #[arg(long, default_value_t = 1.0)]
+        interval: f64,
+        #[arg(long, default_value_t = 5)]
+        cols: u32,
+    },
+    /// Print a clip's RMS loudness (dBFS) per time window
+    Levels {
+        index: usize,
+        /// Window size in seconds
+        #[arg(long, default_value_t = 0.5)]
+        window: f64,
+    },
     /// List silent stretches in a clip's source audio
     Silences {
         index: usize,
@@ -109,6 +139,10 @@ enum Cmd {
         /// keyframes
         #[arg(long)]
         smart: bool,
+        /// Finish for a destination: youtube, shorts, or podcast
+        /// (loudness-normalized; shorts is 1080x1920)
+        #[arg(long)]
+        preset: Option<String>,
     },
 }
 
@@ -143,6 +177,37 @@ fn run() -> Result<()> {
             println!("removed [{}] {}", index, clip.src.display());
             Ok(())
         }),
+        Cmd::Proxy { force } => cmd_proxy(&cli.project, force),
+        Cmd::Waveform { index, width, height } => {
+            let project = Project::load(&cli.project)?;
+            let src = clip_source(&cli.project, &project, index)?;
+            let clip = &project.clips[index];
+            let dest = project_dir(&cli.project)
+                .join("cache")
+                .join(format!("waveform_{index}.png"));
+            viode_core::waveform_png(&src, clip.in_, clip.out, &dest, width, height)?;
+            println!("{}", dest.display());
+            Ok(())
+        }
+        Cmd::Thumbs { index, interval, cols } => {
+            let project = Project::load(&cli.project)?;
+            let src = clip_source(&cli.project, &project, index)?;
+            let clip = &project.clips[index];
+            let dest = project_dir(&cli.project)
+                .join("cache")
+                .join(format!("thumbs_{index}.png"));
+            viode_core::contact_sheet_png(&src, clip.in_, clip.out, &dest, interval, cols, 256)?;
+            println!("{}", dest.display());
+            Ok(())
+        }
+        Cmd::Levels { index, window } => {
+            let project = Project::load(&cli.project)?;
+            let src = clip_source(&cli.project, &project, index)?;
+            for (at, db) in viode_core::audio_levels(&src, window)? {
+                println!("{at}  {db:>7.1} dB");
+            }
+            Ok(())
+        }
         Cmd::Silences { index, threshold, min } => {
             cmd_silences(&cli.project, index, threshold, min)
         }
@@ -159,7 +224,9 @@ fn run() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Render { output, smart } => cmd_render(&cli.project, output, smart),
+        Cmd::Render { output, smart, preset } => {
+            cmd_render(&cli.project, output, smart, preset.as_deref())
+        }
         Cmd::Serve { mcp } => {
             if !mcp {
                 bail!("only --mcp is supported for now (viode serve --mcp)");
@@ -399,17 +466,38 @@ fn cmd_scenes(project_file: &Path, index: usize, threshold: f64) -> Result<()> {
     Ok(())
 }
 
-fn cmd_render(project_file: &Path, output: Option<PathBuf>, smart: bool) -> Result<()> {
+fn cmd_render(
+    project_file: &Path,
+    output: Option<PathBuf>,
+    smart: bool,
+    preset: Option<&str>,
+) -> Result<()> {
     let project = Project::load(project_file)?;
     if project.clips.is_empty() {
         bail!("timeline is empty, nothing to render");
     }
     let dir = project_dir(project_file);
-    let output = output.unwrap_or_else(|| {
-        dir.join("renders").join(format!("{}.mp4", project.project.name))
-    });
+    let preset = preset
+        .map(|p| {
+            viode_core::Preset::parse(p)
+                .with_context(|| format!("unknown preset {p:?} (youtube, shorts, podcast)"))
+        })
+        .transpose()?;
+    if smart && preset.is_some() {
+        bail!("--smart and --preset don't combine: presets re-process the master render");
+    }
 
     let started = std::time::Instant::now();
+    let name = &project.project.name;
+
+    // Presets finish a GES master; a plain render IS the master.
+    let master = match preset {
+        Some(_) => dir.join("cache").join("master.mp4"),
+        None => output.clone().unwrap_or_else(|| {
+            dir.join("renders").join(format!("{name}.mp4"))
+        }),
+    };
+
     let backend: Box<dyn RenderBackend> = if smart {
         eprintln!(
             "note: smart-copy is lossless but cuts snap to source keyframes — \
@@ -420,13 +508,57 @@ fn cmd_render(project_file: &Path, output: Option<PathBuf>, smart: bool) -> Resu
     } else {
         Box::new(GesBackend)
     };
-    backend.render(&project, &dir, &output)?;
+    backend.render(&project, &dir, &master)?;
+
+    let final_path = if let Some(preset) = preset {
+        let out = output.unwrap_or_else(|| {
+            dir.join("renders")
+                .join(format!("{name}-{}.{}", preset_name(preset), preset.extension()))
+        });
+        viode_core::apply_preset(&master, &out, preset)?;
+        out
+    } else {
+        master
+    };
     println!(
-        "rendered {} ({}, {:.1}s{})",
-        output.display(),
+        "rendered {} ({}, {:.1}s{}{})",
+        final_path.display(),
         project.total_duration(),
         started.elapsed().as_secs_f64(),
-        if smart { ", smart-copy" } else { "" }
+        if smart { ", smart-copy" } else { "" },
+        preset.map(|p| format!(", {} preset", preset_name(p))).unwrap_or_default(),
     );
+    Ok(())
+}
+
+fn preset_name(p: viode_core::Preset) -> &'static str {
+    match p {
+        viode_core::Preset::Youtube => "youtube",
+        viode_core::Preset::Shorts => "shorts",
+        viode_core::Preset::Podcast => "podcast",
+    }
+}
+
+fn cmd_proxy(project_file: &Path, force: bool) -> Result<()> {
+    let project = Project::load(project_file)?;
+    let dir = project_dir(project_file);
+    // Every unique media file referenced by the timeline.
+    let mut sources: Vec<_> = project.clips.iter().map(|c| c.src.clone()).collect();
+    sources.sort();
+    sources.dedup();
+    if sources.is_empty() {
+        println!("timeline references no media");
+        return Ok(());
+    }
+    for src in &sources {
+        let started = std::time::Instant::now();
+        let dest = viode_core::build_proxy(&dir, src, force)?;
+        println!(
+            "{} -> {} ({:.1}s)",
+            src.display(),
+            dest.strip_prefix(&dir).unwrap_or(&dest).display(),
+            started.elapsed().as_secs_f64()
+        );
+    }
     Ok(())
 }
