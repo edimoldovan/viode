@@ -115,6 +115,10 @@ Coverage check (optional): `cargo install cargo-llvm-cov && cargo llvm-cov --wor
 
 ## Conventions
 
+- **Document as you go**: README.md is the public face — every user-facing
+  change (new verb, new tool, changed behavior) updates README.md in the
+  same commit. CLAUDE.md tracks phase status; PLAN.md holds the vision.
+
 - KISS. Cuts before effects, CLI before TUI, TUI before GUI. Phase gates in
   PLAN.md are the scope-creep defense.
 - gstreamer-rs crates pinned at 0.24.x — 0.25 needs Rust ≥ 1.92, toolchain
