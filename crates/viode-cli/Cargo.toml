@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 viode-core = { path = "../viode-core" }
 viode-mcp = { path = "../viode-mcp" }
+viode-tui = { path = "../viode-tui" }
 clap.workspace = true
 anyhow.workspace = true
 

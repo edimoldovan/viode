@@ -124,6 +124,8 @@ enum Cmd {
         #[arg(long, default_value_t = 0.4)]
         threshold: f64,
     },
+    /// Open the timeline in the terminal UI
+    Tui,
     /// Run the MCP server (stdio) — lets AI clients edit the project
     Serve {
         /// Speak the Model Context Protocol on stdin/stdout
@@ -227,6 +229,7 @@ fn run() -> Result<()> {
         Cmd::Render { output, smart, preset } => {
             cmd_render(&cli.project, output, smart, preset.as_deref())
         }
+        Cmd::Tui => viode_tui::run(&cli.project),
         Cmd::Serve { mcp } => {
             if !mcp {
                 bail!("only --mcp is supported for now (viode serve --mcp)");

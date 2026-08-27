@@ -39,8 +39,17 @@ multicam podcast edit. Judge designs against that, not the demo clips.
   1080x1920 center-crop, podcast is audio-only m4a. Master renders via GES,
   presets finish with ffmpeg.
 
-Next: **Phase 4 — the TUI** (ratatui timeline, vim-grammar keys, libmpv
-preview; see PLAN.md).
+**Phase 4 (the TUI) — done.** `viode tui` (crates/viode-tui, ratatui):
+proportional clip lane with playhead, vim-adjacent grammar (h/l/H/L move
+playhead, j/k clip edges, s split, i/o trim to playhead, d delete, </>
+move, u/U undo/redo, w save, space plays the clip in mpv, P renders +
+plays a timeline preview, r renders, ? help, q quit with dirty-confirm).
+Playhead selects — verbs act on the clip under it. Proxies are used for
+playback/preview when built. State machine (`app.rs`) is fully
+unit-tested; rendering (`ui.rs`) smoke-tested via TestBackend.
+
+Next: **Phase 5 — the Premiere fight** (multi-track, multicam,
+transcript-driven editing, effects/titles; see PLAN.md).
 
 ## Stack decisions (settled — don't relitigate casually)
 

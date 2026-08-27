@@ -1,0 +1,9 @@
+[package]
+name = "viode-tui"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+viode-core = { path = "../viode-core" }
+ratatui = "0.29"
+anyhow.workspace = true
