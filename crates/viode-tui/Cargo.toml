@@ -2,6 +2,7 @@
 name = "viode-tui"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [dependencies]
 viode-core = { path = "../viode-core" }
