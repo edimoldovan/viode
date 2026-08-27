@@ -275,7 +275,3 @@ Tests generate their own media with ffmpeg and self-skip on machines
 without ffmpeg/GES. Read `crates/viode-cli/tests/cli.rs`
 (`full_edit_workflow`) for the product walkthrough in test form, and
 `crates/viode-cli/tests/mcp.rs` for a worked MCP session.
-
-## License
-
-© Eduard Moldovan AB
