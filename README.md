@@ -1,6 +1,6 @@
 # Viode
 
-**The mission: get Lex Fridman off macOS.**
+## **The mission: get Lex Fridman off macOS.**
 
 Ask anyone who's tried to leave Mac or Windows what's holding them back and
 you'll hear the same answer: *"I would, but I edit video."* Premiere,
