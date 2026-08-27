@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "viode": {
+      "command": "${CLAUDE_PROJECT_DIR}/target/debug/viode",
+      "args": ["serve", "--mcp"]
+    }
+  }
+}

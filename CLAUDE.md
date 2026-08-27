@@ -14,10 +14,19 @@ decisions.
   trait with `GesBackend` (frame-accurate) and `SmartCopyBackend` (lossless,
   keyframe-snapped) in `backend.rs`, nanosecond `Time` type (`time.rs`).
 - `crates/viode-cli` — the `viode` binary: new / import / probe / add / ls /
-  trim / split / move / rm / render.
+  trim / split / move / rm / render / serve.
+- `crates/viode-mcp` — **Phase 2, done**: hand-rolled MCP stdio server
+  (newline-delimited JSON-RPC — the whole protocol layer is `lib.rs`, no
+  framework). Tools mirror the CLI plus the "senses": `frame_grab` (returns
+  a PNG image block), `render_preview` (GES render of a sub-range via
+  `ops::extract_range`). Every edit tool returns the fresh timeline JSON.
+  `.mcp.json` registers it for Claude Code in this repo.
 
-Next: **Phase 2 — MCP server** (`viode serve --mcp`, same verbs plus
-frame_grab / render_preview; see PLAN.md).
+North star (see PLAN.md): a Premiere successor — the bar is a 3-hour
+multicam podcast edit. Judge designs against that, not the demo clips.
+
+Next: **Phase 3 — senses & speed** (proxies, thumbnails, waveforms,
+audio_levels, silence cutting, scene detection, export presets).
 
 ## Stack decisions (settled — don't relitigate casually)
 

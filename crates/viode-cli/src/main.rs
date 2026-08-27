@@ -60,6 +60,12 @@ enum Cmd {
     Move { from: usize, to: usize },
     /// Remove a clip from the timeline
     Rm { index: usize },
+    /// Run the MCP server (stdio) — lets AI clients edit the project
+    Serve {
+        /// Speak the Model Context Protocol on stdin/stdout
+        #[arg(long)]
+        mcp: bool,
+    },
     /// Render the timeline
     Render {
         /// Output path (default: renders/<name>.mp4)
@@ -104,6 +110,15 @@ fn run() -> Result<()> {
             Ok(())
         }),
         Cmd::Render { output, smart } => cmd_render(&cli.project, output, smart),
+        Cmd::Serve { mcp } => {
+            if !mcp {
+                bail!("only --mcp is supported for now (viode serve --mcp)");
+            }
+            // Start with the project if one exists here; tools can also
+            // project_open/project_new later.
+            let initial = cli.project.exists().then(|| cli.project.clone());
+            viode_mcp::serve(initial)
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/viode-core", "crates/viode-cli"]
+members = ["crates/viode-core", "crates/viode-cli", "crates/viode-mcp"]
 
 [workspace.package]
 version = "0.1.0"

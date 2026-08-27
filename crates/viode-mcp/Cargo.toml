@@ -1,0 +1,10 @@
+[package]
+name = "viode-mcp"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+viode-core = { path = "../viode-core" }
+serde_json.workspace = true
+anyhow.workspace = true
+base64 = "0.22"

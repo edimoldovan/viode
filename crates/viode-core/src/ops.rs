@@ -76,6 +76,51 @@ pub fn split(project: &mut Project, index: usize, at: Time) -> Result<(), OpErro
     Ok(())
 }
 
+/// Map a timeline position to (clip index, time within that clip's source).
+/// Returns None past the end of the timeline.
+pub fn source_at(project: &Project, at: Time) -> Option<(usize, Time)> {
+    let mut cursor = Time::ZERO;
+    for (i, clip) in project.clips.iter().enumerate() {
+        let end = cursor + clip.len();
+        if at < end {
+            return Some((i, clip.in_ + (at - cursor)));
+        }
+        cursor = end;
+    }
+    None
+}
+
+/// A new project containing only the [start, end) range of the timeline,
+/// with boundary clips trimmed. Pure timeline math — used for previews.
+pub fn extract_range(project: &Project, start: Time, end: Time) -> Result<Project, OpError> {
+    if start >= end || end > project.total_duration() {
+        return Err(OpError::BadRange(start, end));
+    }
+    let mut out = Project::new(
+        &project.project.name,
+        project.project.fps,
+        project.project.resolution,
+    );
+    let mut cursor = Time::ZERO;
+    for clip in &project.clips {
+        let clip_start = cursor;
+        let clip_end = cursor + clip.len();
+        cursor = clip_end;
+        if clip_end <= start || clip_start >= end {
+            continue;
+        }
+        let mut trimmed = clip.clone();
+        if start > clip_start {
+            trimmed.in_ = clip.in_ + (start - clip_start);
+        }
+        if end < clip_end {
+            trimmed.out = clip.in_ + (end - clip_start);
+        }
+        out.clips.push(trimmed);
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,6 +183,35 @@ mod tests {
         let pos = p.positions();
         assert_eq!(pos[0], Time::ZERO);
         assert_eq!(pos[1], Time::from_secs_f64(3.0).unwrap());
+    }
+
+    #[test]
+    fn source_at_maps_timeline_to_source() {
+        // Timeline: clip0 = a[0..3] at 0..3, clip1 = a[1..4] at 3..6.
+        let p = project();
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        assert_eq!(source_at(&p, t(0.0)), Some((0, t(0.0))));
+        assert_eq!(source_at(&p, t(2.5)), Some((0, t(2.5))));
+        // 0.5s into clip 1, whose source in-point is 1.0 -> source 1.5.
+        assert_eq!(source_at(&p, t(3.5)), Some((1, t(1.5))));
+        assert_eq!(source_at(&p, t(6.0)), None, "end of timeline is exclusive");
+    }
+
+    #[test]
+    fn extract_range_trims_boundary_clips() {
+        let p = project();
+        let t = |s| Time::from_secs_f64(s).unwrap();
+        // Middle 2s spanning the cut between the clips.
+        let sub = extract_range(&p, t(2.0), t(4.0)).unwrap();
+        assert_eq!(sub.clips.len(), 2);
+        assert_eq!(sub.total_duration(), t(2.0));
+        assert_eq!(sub.clips[0].in_, t(2.0)); // tail of clip 0
+        assert_eq!(sub.clips[0].out, t(3.0));
+        assert_eq!(sub.clips[1].in_, t(1.0)); // head of clip 1
+        assert_eq!(sub.clips[1].out, t(2.0));
+
+        assert!(extract_range(&p, t(4.0), t(2.0)).is_err());
+        assert!(extract_range(&p, t(0.0), t(99.0)).is_err());
     }
 }
 
