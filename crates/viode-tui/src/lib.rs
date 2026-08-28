@@ -32,26 +32,21 @@ pub fn run(project_file: &Path) -> Result<()> {
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut shown: Vec<Placement> = Vec::new();
-    let mut play_repaint: Option<std::time::Instant> = None;
     loop {
         app.reap();
         app.media.pump();
 
         // While mpv paints the pane we keep drawing TEXT. Catch: mpv
-        // clears the physical screen on startup, but ratatui renders
-        // DIFFS against its own back buffer — it thinks the text is still
-        // there and writes nothing. So ~400ms in (after mpv's clear) we
-        // force one full repaint. Our own kitty images stay suppressed so
-        // we never delete mpv's frames.
+        // clears the physical screen, and ratatui renders DIFFS against
+        // its back buffer — it would write nothing. So each pass we reset
+        // ratatui's MEMORY of the screen (not the screen itself): every
+        // text cell gets rewritten, which is invisible when unchanged and
+        // never touches mpv's frame. Our own kitty images stay suppressed
+        // so we don't delete mpv's.
         if app.is_playing() {
-            match play_repaint {
-                None => play_repaint = Some(std::time::Instant::now()),
-                Some(t0) if t0.elapsed().as_millis() > 400 => {
-                    terminal.clear()?; // marks every cell dirty
-                    play_repaint = Some(std::time::Instant::now() + std::time::Duration::from_secs(3600));
-                }
-                _ => {}
-            }
+            terminal.swap_buffers();
+            terminal.current_buffer_mut().reset();
+            terminal.swap_buffers();
             terminal.draw(|f| {
                 ui::draw(f, app);
             })?;
@@ -70,7 +65,6 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             }
             continue;
         }
-        play_repaint = None;
         if app.take_image_refresh() {
             // The player is gone: wipe its frames and repaint everything.
             let mut out = std::io::stdout();
