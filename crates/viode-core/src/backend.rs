@@ -306,9 +306,9 @@ pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Time
             })?;
             for tclip in layer.clips() {
                 if tclip.is::<ges::TransitionClip>() && tclip.start() == boundary {
-                    tclip
-                        .set_child_property("vtype", &value.to_value(&enum_class))
-                        .map_err(|e| RenderError::Gst(format!("transition type: {e}")))?;
+                    // vtype is a direct property of GESTransitionClip, not
+                    // a child property.
+                    tclip.set_property_from_value("vtype", &value.to_value(&enum_class));
                 }
             }
         }

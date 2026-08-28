@@ -16,7 +16,7 @@ trap 'echo; echo "workdir kept for inspection: $work"' EXIT
 cd "$work"
 
 t() { local label="$1"; shift; local s=$EPOCHREALTIME; "$@" >/dev/null; local e=$EPOCHREALTIME
-     printf "%-46s %8.2fs\n" "$label" "$(echo "$e - $s" | bc)"; }
+     awk -v a="$s" -v b="$e" -v l="$label" 'BEGIN { printf "%-46s %8.2fs\n", l, b - a }'; }
 
 echo "== The 3-hour project (His Girl Friday + Sita, real dialogue + music) =="
 "$VIODE" new feature >/dev/null && cd feature
@@ -45,7 +45,7 @@ t "create angle2 (10min re-encode)"       ffmpeg -y -loglevel error -ss 2 -t 600
     -c:v libx264 -preset veryfast -c:a aac ../angle2.mp4
 t "angle add (audio auto-sync)"           "$VIODE" angle ../angle2.mp4
 grep -A4 'angle' project.viode | head -6
-t "take 60s from the angle"               "$VIODE" take 2 00:30 01:30
+t "take 60s from the angle"               "$VIODE" take 1 00:30 01:30
 
 echo
 echo "== The pro pass on a 60s excerpt =="
@@ -64,11 +64,12 @@ t "scope (waveform) of graded clip"        "$VIODE" scope 0
 t "podcast preset export"                  "$VIODE" render --preset podcast
 t "ProRes interchange export"              "$VIODE" render --codec prores
 
-if [ -f "$MEDIA/bbb_4k.mp4" ]; then
+UHD="$MEDIA/bbb_4k_1h.mp4"; [ -f "$UHD" ] || UHD="$MEDIA/bbb_4k.mp4"
+if [ -f "$UHD" ]; then
   echo
-  echo "== 4K stress (2160p60) =="
+  echo "== 4K stress (2160p60, $(basename "$UHD")) =="
   cd .. && "$VIODE" new uhd >/dev/null && cd uhd
-  t "add 4K60 file (probe)"                "$VIODE" add "$MEDIA/bbb_4k.mp4"
+  t "add 4K60 file (probe)"                "$VIODE" add "$UHD"
   t "proxy the 4K file"                    "$VIODE" proxy
   t "split x10"                            bash -c "for i in \$(seq 0 9); do '$VIODE' split \$i 20 >/dev/null; done"
   "$VIODE" trim 0 --out 00:30 >/dev/null 2>&1 || true
