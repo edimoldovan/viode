@@ -9,13 +9,23 @@ on Linux. Lex edits a 3-hour podcast; today that means Apple hardware and
 Adobe rent. The day he can cut an episode faster on Linux than on his Mac,
 that excuse dies for everyone.
 
-Viode is that editor: **terminal-native, AI-native, built for Linux.**
+Viode is that editor, built Linux-first around three ideas:
 
-The timeline is a text file. Every operation is a CLI verb. An AI can drive
-the whole editor over [MCP](https://modelcontextprotocol.io) — including
-*looking at* your footage. No Electron, no cloud, no subscription. Your
-edit is a git repo, your cuts are diffs, and "remove the dead air from
-this episode" is a sentence, not an afternoon.
+- **Your edit is data you own.** The timeline is a plain text file: diff a
+  cut, revert a mistake, review an edit like a pull request. No opaque
+  project blobs, no cloud, no subscription.
+- **The editor does the tedious work.** Remove dead air with one command.
+  Sync multicam angles by their audio, no clap slate. Delete a sentence in
+  the transcript and the video cuts itself. Export with correct loudness
+  without knowing what LUFS means.
+- **AI is a first-class editor, not a plugin.** Claude (or any
+  [MCP](https://modelcontextprotocol.io) client) drives the same engine you
+  do — it can cut, trim, *look at frames*, read waveforms, and render.
+
+Today Viode ships a CLI, an MCP server, and a fast keyboard UI with real
+filmstrips and inline playback. They are all thin clients over one engine
+(`viode-core`) — a full graphical UI is a planned client of the same core,
+not a rewrite.
 
 ## Where Viode already beats Premiere
 
@@ -36,28 +46,21 @@ mixing, and keyframes shipped in Phase 6 — press space in the TUI and the
 timeline plays *inside the terminal*, instantly, with zero rendering. The
 table above is the part they can't copy back.
 
-```
-┌─ demo * ── 1280x720 @ 30 fps ── 3 clips ── total 00:00:05.000 ─────────┐
-│                    ▼                                                   │
-│ ███ 0:clip1 ██████│██ 1:clip1 ███│████████████ 2:clip2 ████████████████│
-│    00:00:01.500       00:00:01.500          00:00:02.000               │
-└─ h/l ±0.1s  j/k clips  s split  i/o trim  d del  u undo  ␣ play ───────┘
-```
+![Viode editing a timeline: filmstrips, waveforms, playhead, and live playback](docs/screenshot.png)
+
+*Filmstrips, waveforms, a playhead — and live video playback of the edit,
+with zero rendering in between.*
 
 ## Why
 
-Video editing on Linux is either a 2004 desktop paradigm or a webapp in a
-trenchcoat. Meanwhile the terminal stack figured out decades ago that
-**plain text + composable tools + keyboard** beats mouse-driven monoliths.
-Viode applies that to video:
-
-- **The project is a directory, the timeline is TOML.** `git diff` your
-  edit. `git revert` a bad cut. Review a cut like a pull request.
-- **Every operation is a CLI verb.** Scriptable, cronable, pipeable.
-- **MCP is a first-class client.** Claude (or any MCP client) speaks the
-  same protocol as the TUI: it can cut, trim, look at frames, read
-  waveforms, and render. The AI isn't a plugin bolted onto a GUI — it's an
-  editor sitting next to you.
+Editing is a feedback loop: look, cut, look again. Viode is built so that
+loop has nothing in it that isn't editing — no waiting on renders to see a
+cut (playback of your edit starts instantly), no clicking through hours of
+footage to find dead air (one command), no re-syncing cameras by hand (the
+audio does it), no guessing at loudness specs (presets know). And because
+every capability is exposed as a command and an MCP tool, anything
+repetitive can be scripted or delegated to an AI that works with the same
+precision you do.
 
 The acceptance test is written down and non-negotiable: **Lex edits a
 3-hour multicam podcast in Viode, and it's *better* than his Mac setup.**
@@ -96,10 +99,11 @@ Or skip the typing:
 viode tui
 ```
 
-## The TUI
+## The keyboard UI
 
-`viode tui` opens the timeline. There is no mouse and no separate selection:
-**the playhead is the selection** — move it, then act on the clip under it.
+`viode tui` opens the timeline (shown above). There is no mouse and no
+separate selection: **the playhead is the selection** — move it, then act
+on the clip under it.
 
 In kitty/ghostty (Omarchy's terminals) the TUI draws **real video
 thumbnails** above the clip lane and **audio waveforms** below it via the
