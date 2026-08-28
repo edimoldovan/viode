@@ -68,6 +68,38 @@ The acceptance test is written down and non-negotiable: **Lex edits a
 Every design decision gets judged against that bar — "works on a 3-minute
 demo" is not done. See [PLAN.md](PLAN.md) for the full vision.
 
+
+## Proven on real media
+
+Not demo clips — real films, measured end-to-end on 2026-08-28.
+Test bench: AMD Ryzen 9 9950X3D (16c/32t), 60 GB RAM, Radeon iGPU,
+WD_BLACK SN8100 NVMe, Arch Linux (kernel 7.1.8). Media: His Girl Friday
+(1940, 1h32m of the fastest dialogue ever filmed), Sita Sings the Blues
+(CC, 1h22m), and an hour of genuine 4K60 (Big Buck Bunny, lossless-looped).
+Protocol: [scripts/test-real-media.sh](scripts/test-real-media.sh).
+
+| Real-world task | Time |
+|---|---|
+| Build a 2h53m two-film timeline | 0.4s |
+| 50 splits across that 3-hour timeline | 0.15s (~3ms per edit) |
+| Silence scan over 92 min of rapid dialogue | 8.6s (~640× realtime) |
+| Proxy ~3h of footage | 125s (~85× realtime) |
+| Multicam auto-sync on real 1940s audio | 4.0s — found the 2.000s offset **exactly** |
+| Cut to the synced angle (`take`) | instant |
+| Render an 80s composite (wipe + grade + 1.5× speed + PiP + title) | 4.9s |
+| Loudness-normalized podcast export | 7.6s |
+| ProRes interchange export | 10.2s |
+| Probe a 1-hour 4K60 file | 2.4s |
+| Proxy 1 hour of 4K60 | 6m21s (~10× realtime — within 1.4× of the raw decode floor) |
+| Render 30s of true 3840×2160@60 | 17.8s (1.7× realtime) |
+
+Two bugs no synthetic test had caught fell out of this session — a
+transition-type render failure and renders silently ignoring project
+resolution — both fixed with regression tests the same day. The
+optimization backlog is measured, not guessed (VA-API proxying tested
+**4.5× slower** than this CPU, so it stays opt-in): see the performance
+section in [PLAN.md](PLAN.md).
+
 ## Install
 
 Requirements (Arch package names; any distro works with equivalents):
