@@ -259,6 +259,8 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 3 | Silence/scene detection, proxies, waveforms, export presets | ✅ |
 | 4 | The TUI | ✅ |
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
+| 6 | Daily-driver gap: live playback, audio control, keyframes | ⏳ |
+| 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth | ⏳ |
 
 ## Development
 

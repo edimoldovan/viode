@@ -76,7 +76,12 @@ in cache/tui/ keyed by src+in/out). Text fallback everywhere else;
 `VIODE_NO_GRAPHICS=1` forces it. Images re-emit only when placements
 change. Colors stay named-ANSI so the TUI inherits the Omarchy theme.
 
-All phases complete. Next: polish, packaging (AUR), real-footage dogfooding.
+Phases 0–5 complete. Next: **Phase 6 — the daily-driver gap** (live
+timeline playback via mpv EDL then a GES preview sink; per-clip audio
+gain/keyframes/meters; keyframing) and **Phase 7 — the pro-work gap**
+(transforms/PiP, color + scopes, ripple/roll/slip/slide, speed ramps,
+transition/title depth, export breadth, media relinking). Full ranked
+gap analysis vs Premiere: PLAN.md Phases 6–7.
 
 ## Stack decisions (settled — don't relitigate casually)
 
