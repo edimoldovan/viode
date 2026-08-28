@@ -61,6 +61,9 @@ impl Preview {
             .arg(format!("--start={start_secs}"))
             .arg(format!("--input-ipc-server={}", sock.display()))
             .arg("--really-quiet")
+            // Draw into OUR screen — no alternate screen, no clearing the
+            // TUI away.
+            .arg("--vo-kitty-alt-screen=no")
             .arg("--no-input-terminal") // our event loop owns the keyboard
             .arg(target)
             .stdin(std::process::Stdio::null())
