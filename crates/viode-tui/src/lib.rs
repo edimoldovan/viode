@@ -34,6 +34,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
     let mut shown: Vec<Placement> = Vec::new();
     let mut playing_ticks = 0u32;
     let mut empty_ticks = 0u32;
+    let mut force_emit = false;
     loop {
         app.reap();
         app.media.pump();
@@ -73,6 +74,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
                     // mpv's pane geometry was fixed at spawn — stop
                     // cleanly rather than paint in the wrong place.
                     app.stop_preview();
+                    force_emit = true;
                     app.message = "resized — space to play again".into();
                 }
                 _ => {}
@@ -99,10 +101,11 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
         // until the replacements exist, and only truly wipe if emptiness
         // persists (e.g. all clips deleted).
         if app.graphics {
-            if !placements.is_empty() && placements != shown {
+            if !placements.is_empty() && (force_emit || placements != shown) {
                 emit_images(&placements, true)?;
                 shown = placements;
                 empty_ticks = 0;
+                force_emit = false;
             } else if placements.is_empty() && !shown.is_empty() {
                 empty_ticks += 1;
                 if empty_ticks > 20 {
@@ -126,7 +129,10 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
                     return Ok(());
                 }
             }
-            Event::Resize(..) => {} // ready-swap above re-emits when new sizes exist
+            // The terminal drops/reflows images on resize; sizes may be
+            // IDENTICAL afterwards (vertical resize), so force the next
+            // available placements out regardless of the diff.
+            Event::Resize(..) => force_emit = true,
             _ => {}
         }
     }
