@@ -33,6 +33,7 @@ pub fn run(project_file: &Path) -> Result<()> {
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut shown: Vec<Placement> = Vec::new();
     let mut playing_ticks = 0u32;
+    let mut empty_ticks = 0u32;
     loop {
         app.reap();
         app.media.pump();
@@ -62,14 +63,19 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             if !event::poll(Duration::from_millis(100))? {
                 continue;
             }
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char(' ') => app.toggle_pause(),
-                        KeyCode::Char('x') | KeyCode::Char('q') => app.stop_preview(),
-                        _ => {}
-                    }
+            match event::read()? {
+                Event::Key(key) if key.kind == KeyEventKind::Press => match key.code {
+                    KeyCode::Char(' ') => app.toggle_pause(),
+                    KeyCode::Char('x') | KeyCode::Char('q') => app.stop_preview(),
+                    _ => {}
+                },
+                Event::Resize(..) => {
+                    // mpv's pane geometry was fixed at spawn — stop
+                    // cleanly rather than paint in the wrong place.
+                    app.stop_preview();
+                    app.message = "resized — space to play again".into();
                 }
+                _ => {}
             }
             continue;
         }
@@ -88,9 +94,27 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
 
         // Images are independent of the text buffer: re-emit only when the
         // set of placements actually changed (edit, resize, thumb ready).
-        if app.graphics && placements != shown {
-            emit_images(&placements, true)?;
-            shown = placements;
+        // An EMPTY set usually means a resize invalidated the pixel-sized
+        // cache and regeneration is in flight — keep the old images up
+        // until the replacements exist, and only truly wipe if emptiness
+        // persists (e.g. all clips deleted).
+        if app.graphics {
+            if !placements.is_empty() && placements != shown {
+                emit_images(&placements, true)?;
+                shown = placements;
+                empty_ticks = 0;
+            } else if placements.is_empty() && !shown.is_empty() {
+                empty_ticks += 1;
+                if empty_ticks > 20 {
+                    let mut out = std::io::stdout();
+                    out.write_all(graphics::delete_all())?;
+                    out.flush()?;
+                    shown.clear();
+                    empty_ticks = 0;
+                }
+            } else {
+                empty_ticks = 0;
+            }
         }
 
         if !event::poll(Duration::from_millis(100))? {
@@ -102,7 +126,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
                     return Ok(());
                 }
             }
-            Event::Resize(..) => shown.clear(), // force re-emit at new geometry
+            Event::Resize(..) => {} // ready-swap above re-emits when new sizes exist
             _ => {}
         }
     }
