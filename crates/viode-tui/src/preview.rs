@@ -116,6 +116,19 @@ impl Preview {
     }
 
     pub fn stop(&mut self) {
+        // Ask nicely first: a graceful quit lets mpv restore the terminal
+        // modes it enabled (mouse reporting!). Kill only as fallback.
+        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(&self.sock) {
+            use std::io::Write;
+            let _ = writeln!(s, "{{\"command\":[\"quit\"]}}");
+        }
+        for _ in 0..10 {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                let _ = std::fs::remove_file(&self.sock);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(30));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = std::fs::remove_file(&self.sock);

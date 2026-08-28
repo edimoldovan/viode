@@ -27,6 +27,10 @@ pub fn run(project_file: &Path) -> Result<()> {
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, &mut app);
     ratatui::restore();
+    // mpv may have enabled terminal modes we never asked for (mouse
+    // reporting); switch them off unconditionally so the shell is clean.
+    use ratatui::crossterm::{event::DisableMouseCapture, execute};
+    let _ = execute!(std::io::stdout(), DisableMouseCapture);
     result
 }
 
