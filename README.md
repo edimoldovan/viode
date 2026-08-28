@@ -39,7 +39,6 @@ not a rewrite.
 | Automation | ExtendScript, mostly abandoned | every feature is a CLI verb; cron it, pipe it, script it |
 | AI | none that matters | a first-class MCP client that can cut, trim, *look at frames*, read waveforms, and render |
 | Loudness-correct exports | know the right LUFS, configure it | `viode render --preset podcast` — two-pass EBU R128 built in |
-| Price | rent, forever | MIT, forever |
 
 Every planned phase has shipped: playback (instant in-terminal AND live
 composited), audio mixing, keyframes, transforms/PiP, color with scopes,

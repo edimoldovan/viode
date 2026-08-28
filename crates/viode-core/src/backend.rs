@@ -218,6 +218,23 @@ pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Time
         let timeline = ges::Timeline::new_audio_video();
         timeline.set_auto_transition(true); // overlaps crossfade automatically
 
+        // GES video tracks default to 720p30 restriction caps — without
+        // this, renders silently ignore the project resolution.
+        let [w, h] = project.project.resolution;
+        let fps = gst::Fraction::approximate_f64(project.project.fps)
+            .unwrap_or_else(|| gst::Fraction::new(30, 1));
+        for track in timeline.tracks() {
+            if track.track_type() == ges::TrackType::VIDEO {
+                track.set_restriction_caps(
+                    &gst::Caps::builder("video/x-raw")
+                        .field("width", w as i32)
+                        .field("height", h as i32)
+                        .field("framerate", fps)
+                        .build(),
+                );
+            }
+        }
+
         // GES layer priority: first appended = topmost. Titles, then
         // overlay tracks (later file order on top), main sequence at the
         // bottom.

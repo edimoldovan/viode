@@ -803,4 +803,12 @@ fn render_produces_frame_accurate_output() {
         (dur - 1.0).abs() < 0.15,
         "expected ~1.0s render, got {dur}s"
     );
+    // Renders must honor the PROJECT resolution, not GES's 720p default
+    // (real-media testing caught this) — 320x180 here.
+    let wh = Proc::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "csv=p=0"])
+        .arg(&out)
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&wh.stdout).trim(), "320,180");
 }
