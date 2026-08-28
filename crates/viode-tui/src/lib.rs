@@ -50,11 +50,13 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             terminal.swap_buffers();
             let mut placements = Vec::new();
             terminal.draw(|f| placements = ui::draw(f, app))?;
-            shown.clear(); // mpv's startup clear ate our images
-            // Half a second in (past that clear), put the filmstrips
-            // back: transmit WITHOUT delete-all so mpv's frame survives.
+            shown.clear(); // mpv's startup clear may eat our images
+            // Keep re-transmitting the filmstrips (no delete-all, same
+            // ids — atomic, invisible) every tick for the first second,
+            // so they are present immediately and outlive mpv's startup
+            // wipe within 100ms, whenever it happens.
             playing_ticks += 1;
-            if playing_ticks == 5 {
+            if playing_ticks <= 10 {
                 emit_images(&placements, false)?;
             }
             if !event::poll(Duration::from_millis(100))? {
