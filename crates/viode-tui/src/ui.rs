@@ -35,7 +35,9 @@ fn block(title: &str) -> Block<'_> {
 pub fn draw(f: &mut Frame, app: &mut App) -> Vec<Placement> {
     let overlay_lanes = app.project.tracks.len().saturating_sub(1) as u16;
     let title_lane = u16::from(!app.project.titles.is_empty());
-    let image_rows = if app.graphics { THUMB_ROWS + WAVE_ROWS } else { 0 };
+    // Graphics mode: +image rows, -1 because the slim clip bar replaces
+    // the two-row lane+labels pair.
+    let image_rows = if app.graphics { THUMB_ROWS + WAVE_ROWS - 1 } else { 0 };
     let [header, timeline, details, _filler, status] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(6 + overlay_lanes + title_lane + image_rows),
@@ -111,12 +113,13 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
     let playhead_col = col(app.playhead, total, width);
     let mut lines: Vec<Line> = Vec::new();
 
-    // Timecode ruler with the playhead marker.
-    let mut ruler: Vec<char> = vec!['·'; width as usize];
+    // Timecode ruler: sparse ticks, no noise.
+    let mut ruler: Vec<char> = vec![' '; width as usize];
     let tick_every = (width / 6).max(1);
     for tick in (0..width).step_by(tick_every as usize) {
         let t = Time((tick as u128 * total as u128 / width.max(1) as u128) as u64);
-        let label: Vec<char> = format!("{t}").chars().skip(3).take(9).collect(); // MM:SS.mmm
+        let text = t.to_string();
+        let label: Vec<char> = format!("╷{}", &text[3..]).chars().collect(); // MM:SS.mmm
         for (k, ch) in label.into_iter().enumerate() {
             let x = tick as usize + k;
             if x < ruler.len() {
@@ -192,13 +195,15 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
         })
         .collect();
 
-    // Thumbnail strip: real frames in graphics terminals. The rows are left
-    // blank in the text buffer; kitty images float over them.
+    // Filmstrip: real frames in graphics terminals, a one-column gutter
+    // between clips so neighbours read as separate shots. The text cells
+    // underneath carry only the playhead needle (images sit at z=-1, so
+    // glyphs stay on top).
     let mut placements: Vec<Placement> = Vec::new();
     if app.graphics {
         let thumb_y = area.y + 1 + lines.len() as u16;
         for (i, &(from, to)) in cells.iter().enumerate() {
-            let cols = (to - from) as u16;
+            let cols = (to - from).saturating_sub(1) as u16; // gutter
             if cols < 2 {
                 continue;
             }
@@ -214,49 +219,79 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
             }
         }
         for _ in 0..THUMB_ROWS {
-            lines.push(Line::raw(""));
+            lines.push(needle_line(width as usize, playhead_col));
         }
     }
 
-    // Main lane: proportional blocks, selected clip highlighted.
-    let mut lane: Vec<Span> = Vec::new();
-    let mut labels: Vec<Span> = Vec::new();
-    let mut cursor = 0usize;
-    for (i, clip) in main.clips.iter().enumerate() {
-        let (from, to) = cells[i];
-        let w = to - from.min(to);
-        if from > cursor {
-            lane.push(Span::raw(" ".repeat(from - cursor)));
-            labels.push(Span::raw(" ".repeat(from - cursor)));
+    if app.graphics {
+        // A slim, quiet clip bar: the filmstrip IS the clip; this row just
+        // names it. Selection reads as the accent color, nothing shouts.
+        let mut bar: Vec<Span> = Vec::new();
+        let mut cursor = 0usize;
+        for (i, clip) in main.clips.iter().enumerate() {
+            let (from, to) = cells[i];
+            let w = (to - from).saturating_sub(1); // align with the gutter
+            if from > cursor {
+                bar.push(Span::raw(" ".repeat(from - cursor)));
+            }
+            let name = clip
+                .src
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let fade = if clip.transition.is_some() { "⤬ " } else { "" };
+            let text = truncate(&format!(" {fade}{i} · {name} · {} ", clip.len()), w);
+            let style = if Some(i) == selected {
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            bar.push(Span::styled(format!("{text:─^w$}"), style));
+            bar.push(Span::raw(" "));
+            cursor = to;
         }
-        let mut style = Style::default()
-            .bg(CLIP_COLORS[i % CLIP_COLORS.len()])
-            .fg(Color::Black);
-        if Some(i) == selected {
-            style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+        lines.push(Line::from(bar));
+    } else {
+        // Text fallback: proportional color blocks + duration labels.
+        let mut lane: Vec<Span> = Vec::new();
+        let mut labels: Vec<Span> = Vec::new();
+        let mut cursor = 0usize;
+        for (i, clip) in main.clips.iter().enumerate() {
+            let (from, to) = cells[i];
+            let w = to - from.min(to);
+            if from > cursor {
+                lane.push(Span::raw(" ".repeat(from - cursor)));
+                labels.push(Span::raw(" ".repeat(from - cursor)));
+            }
+            let mut style = Style::default()
+                .bg(CLIP_COLORS[i % CLIP_COLORS.len()])
+                .fg(Color::Black);
+            if Some(i) == selected {
+                style = style.add_modifier(Modifier::BOLD | Modifier::REVERSED);
+            }
+            let name = clip
+                .src
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let fade = if clip.transition.is_some() { "⤬" } else { "" };
+            let text = truncate(&format!("{fade}{i}:{name}"), w);
+            lane.push(Span::styled(format!("{text:^w$}"), style));
+            labels.push(Span::styled(
+                truncate(&format!("{:^w$}", clip.len().to_string()), w),
+                Style::default().fg(Color::DarkGray),
+            ));
+            cursor = to;
         }
-        let name = clip
-            .src
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let fade = if clip.transition.is_some() { "⤬" } else { "" };
-        let text = truncate(&format!("{fade}{i}:{name}"), w);
-        lane.push(Span::styled(format!("{text:^w$}"), style));
-        labels.push(Span::styled(
-            truncate(&format!("{:^w$}", clip.len().to_string()), w),
-            Style::default().fg(Color::DarkGray),
-        ));
-        cursor = to;
+        lines.push(Line::from(lane));
+        lines.push(Line::from(labels));
     }
-    lines.push(Line::from(lane));
-    lines.push(Line::from(labels));
 
-    // Waveform strip under the labels.
+    // Waveform strip under the clip bar, same gutters, needle through it.
     if app.graphics {
         let wave_y = area.y + 1 + lines.len() as u16;
         for (i, &(from, to)) in cells.iter().enumerate() {
-            let cols = (to - from) as u16;
+            let cols = (to - from).saturating_sub(1) as u16;
             if cols < 2 {
                 continue;
             }
@@ -272,7 +307,7 @@ fn draw_timeline(f: &mut Frame, app: &mut App, area: Rect) -> Vec<Placement> {
             }
         }
         for _ in 0..WAVE_ROWS {
-            lines.push(Line::raw(""));
+            lines.push(needle_line(width as usize, playhead_col));
         }
     }
 
@@ -361,6 +396,16 @@ fn draw_help(f: &mut Frame) {
         Paragraph::new(text).block(block("help")).fg(Color::White),
         area,
     );
+}
+
+/// A mostly-empty row with the playhead needle: images at z=-1 show through
+/// default-background cells, and glyphs stay on top of images.
+fn needle_line(width: usize, col: usize) -> Line<'static> {
+    let mut s = " ".repeat(col.min(width));
+    if col < width {
+        s.push('│');
+    }
+    Line::styled(s, Style::default().fg(Color::Yellow))
 }
 
 fn centered(w: u16, h: u16, r: Rect) -> Rect {
