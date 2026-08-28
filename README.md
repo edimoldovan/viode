@@ -30,9 +30,11 @@ this episode" is a sentence, not an afternoon.
 | Loudness-correct exports | know the right LUFS, configure it | `viode render --preset podcast` — two-pass EBU R128 built in |
 | Price | rent, forever | MIT, forever |
 
-Premiere still wins on live playback, audio mixing, keyframes, color, and
-twenty years of trim tools — that gap is the roadmap ([PLAN.md](PLAN.md),
-Phases 6–7). The table above is the part they can't easily copy.
+What's left before there's no reason to open Premiere at all: color,
+transforms, deep trim tools ([PLAN.md](PLAN.md), Phase 7). Playback, audio
+mixing, and keyframes shipped in Phase 6 — press space in the TUI and the
+timeline plays *inside the terminal*, instantly, with zero rendering. The
+table above is the part they can't copy back.
 
 ```
 ┌─ demo * ── 1280x720 @ 30 fps ── 3 clips ── total 00:00:05.000 ─────────┐
@@ -116,8 +118,9 @@ and therefore aether/Omarchy — is running.
 | `d` | delete clip |
 | `<` `>` | move clip left / right in the sequence |
 | `u` `U` | undo / redo |
-| `space` | play clip in mpv from playhead |
-| `P` | render + play a preview of the whole timeline |
+| `space` | play the timeline INLINE from the playhead (instant, cuts-only) / pause |
+| `x` | stop playback |
+| `P` | composited preview (tracks, fades, titles, keyframes), played inline |
 | `r` | render the master |
 | `w` / `q` / `?` | save / quit (confirms if unsaved) / help |
 
@@ -134,6 +137,10 @@ viode trim <i> [--in T] [--out T]               change source in/out points
 viode move <from> <to>                          reorder clips
 viode rm <i>                                    remove a clip
 viode fade <i> <dur>                            crossfade with previous clip (0 clears)
+viode gain <i> <vol>                            audio gain (linear, 1.0 = unity)
+viode pan <i> <p>                               stereo pan, -1..1
+viode key <i> <volume|alpha> <at> <val>         keyframe (ducking, fades, opacity)
+viode keys <i> [--rm k]                         list / remove keyframes
 viode fx <i> "<gst effect>" [--track N]         add effect, e.g. "videobalance saturation=0"
 viode track add <name> [--kind video|audio]     overlay tracks (B-roll, music)
 viode track ls / on <i> / off <i>               manage tracks
@@ -276,7 +283,7 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 3 | Silence/scene detection, proxies, waveforms, export presets | ✅ |
 | 4 | The TUI | ✅ |
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
-| 6 | Daily-driver gap: live playback, audio control, keyframes | ⏳ |
+| 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
 | 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth | ⏳ |
 
 ## Development

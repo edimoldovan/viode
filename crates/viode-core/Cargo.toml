@@ -12,6 +12,7 @@ thiserror.workspace = true
 gstreamer.workspace = true
 gstreamer-editing-services.workspace = true
 gstreamer-pbutils.workspace = true
+gstreamer-controller.workspace = true
 
 [dev-dependencies]
 proptest = "1"

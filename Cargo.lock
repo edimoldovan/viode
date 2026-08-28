@@ -595,6 +595,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "gstreamer-controller"
+version = "0.24.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d0b0ccee595c4a3dd8b8e9b9fd399a217bc6c007ff00451dc5615db899ee2fa3"
+dependencies = [
+ "glib",
+ "gstreamer",
+ "gstreamer-controller-sys",
+]
+
+[[package]]
+name = "gstreamer-controller-sys"
+version = "0.24.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ef97043a716992ad6e21b814c671840668e236e1ae42541c5b3d35cba6eff4d"
+dependencies = [
+ "glib-sys",
+ "gobject-sys",
+ "gstreamer-sys",
+ "libc",
+ "pkg-config",
+ "system-deps",
+]
+
+[[package]]
 name = "gstreamer-editing-services"
 version = "0.24.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1604,6 +1629,7 @@ name = "viode-core"
 version = "0.1.0"
 dependencies = [
  "gstreamer",
+ "gstreamer-controller",
  "gstreamer-editing-services",
  "gstreamer-pbutils",
  "proptest",

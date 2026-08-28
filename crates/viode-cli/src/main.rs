@@ -71,6 +71,39 @@ enum Cmd {
     Rm { index: usize },
     /// Crossfade a main-track clip with the previous one (0 clears)
     Fade { index: usize, duration: String },
+    /// Set a clip's audio gain (linear, 1.0 = unity; e.g. 0.5 = -6dB)
+    Gain {
+        index: usize,
+        volume: f64,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Pan a clip's audio: -1.0 (left) .. 1.0 (right)
+    Pan {
+        index: usize,
+        #[arg(allow_negative_numbers = true)]
+        pan: f64,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Add a keyframe: prop is volume (0..2) or alpha (0..1), at is SOURCE time
+    Key {
+        index: usize,
+        prop: String,
+        at: String,
+        value: f64,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// List / remove keyframes on a clip
+    Keys {
+        index: usize,
+        /// Remove the keyframe with this number
+        #[arg(long)]
+        rm: Option<usize>,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
     /// Add/clear GStreamer effects on a clip, e.g. "videobalance saturation=0"
     Fx {
         index: usize,
@@ -261,6 +294,60 @@ fn run() -> Result<()> {
                 "clip {index} crossfade: {}",
                 d.map(|d| d.to_string()).unwrap_or_else(|| "none".into())
             );
+            Ok(())
+        }),
+        Cmd::Gain { index, volume, track } => with_project(&cli.project, |p| {
+            if !(0.0..=10.0).contains(&volume) {
+                bail!("volume {volume} out of range (0..10, 1.0 = unity)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).with_context(|| format!("clip {index} out of range"))?;
+            c.volume = (volume != 1.0).then_some(volume);
+            println!("track {track} clip {index} gain {volume}");
+            Ok(())
+        }),
+        Cmd::Pan { index, pan, track } => with_project(&cli.project, |p| {
+            if !(-1.0..=1.0).contains(&pan) {
+                bail!("pan {pan} out of range (-1..1)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).with_context(|| format!("clip {index} out of range"))?;
+            c.pan = (pan != 0.0).then_some(pan);
+            println!("track {track} clip {index} pan {pan}");
+            Ok(())
+        }),
+        Cmd::Key { index, prop, at, value, track } => with_project(&cli.project, |p| {
+            if prop != "volume" && prop != "alpha" {
+                bail!("unknown property {prop:?} (volume, alpha)");
+            }
+            if value < 0.0 {
+                bail!("keyframe values must be >= 0");
+            }
+            let at = Time::parse(&at)?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).with_context(|| format!("clip {index} out of range"))?;
+            c.keys.push(viode_core::Keyframe { prop: prop.clone(), at, value });
+            c.keys.sort_by(|a, b| (a.prop.clone(), a.at).cmp(&(b.prop.clone(), b.at)));
+            println!("clip {index}: {prop} -> {value} at source {at}");
+            Ok(())
+        }),
+        Cmd::Keys { index, rm, track } => with_project(&cli.project, |p| {
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).with_context(|| format!("clip {index} out of range"))?;
+            if let Some(k) = rm {
+                if k >= c.keys.len() {
+                    bail!("keyframe {k} out of range");
+                }
+                let key = c.keys.remove(k);
+                println!("removed {} @ {}", key.prop, key.at);
+            } else {
+                for (k, key) in c.keys.iter().enumerate() {
+                    println!("[{k}] {} @ {} = {}", key.prop, key.at, key.value);
+                }
+                if c.keys.is_empty() {
+                    println!("no keyframes");
+                }
+            }
             Ok(())
         }),
         Cmd::Fx { index, effect, track, clear } => with_project(&cli.project, |p| {

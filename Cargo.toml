@@ -24,3 +24,4 @@ clap = { version = "4", features = ["derive"] }
 gstreamer = "0.24"
 gstreamer-editing-services = "0.24"
 gstreamer-pbutils = "0.24"
+gstreamer-controller = "0.24"

@@ -7,6 +7,7 @@
 pub mod app;
 pub mod graphics;
 pub mod media;
+pub mod preview;
 pub mod ui;
 
 use std::io::Write;
@@ -38,6 +39,13 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
         let mut placements = Vec::new();
         terminal.draw(|f| placements = ui::draw(f, app))?;
 
+        if app.take_image_refresh() {
+            // A player just released the pane — wipe its leftovers.
+            let mut out = std::io::stdout();
+            out.write_all(graphics::delete_all())?;
+            out.flush()?;
+            shown.clear();
+        }
         // Images are independent of the text buffer: re-emit only when the
         // set of placements actually changed (edit, resize, thumb ready).
         if app.graphics && placements != shown {

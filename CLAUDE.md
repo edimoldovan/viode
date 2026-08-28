@@ -76,12 +76,25 @@ in cache/tui/ keyed by src+in/out). Text fallback everywhere else;
 `VIODE_NO_GRAPHICS=1` forces it. Images re-emit only when placements
 change. Colors stay named-ANSI so the TUI inherits the Omarchy theme.
 
-Phases 0–5 complete. Next: **Phase 6 — the daily-driver gap** (live
-timeline playback via mpv EDL then a GES preview sink; per-clip audio
-gain/keyframes/meters; keyframing) and **Phase 7 — the pro-work gap**
-(transforms/PiP, color + scopes, ripple/roll/slip/slide, speed ramps,
-transition/title depth, export breadth, media relinking). Full ranked
-gap analysis vs Premiere: PLAN.md Phases 6–7.
+**Phase 6 (daily-driver gap) — done.**
+
+- Inline playback (`viode-tui/preview.rs`): mpv --vo=kitty draws video
+  INSIDE the terminal, positioned in the preview pane. space = instant
+  cuts-only playback from the playhead via an mpv EDL playlist (zero
+  render), pause via IPC socket; x stops; P renders the GES composite
+  (tracks/fades/titles/keyframes) and plays it inline.
+- Audio control: per-clip `volume` (linear gain) and `pan`
+  (audiopanorama), `viode gain/pan`, MCP gain_set/pan_set.
+- Keyframes: `[[track.clip.key]]` (prop volume|alpha, at = SOURCE time,
+  linear interpolation) bound via gstreamer-controller
+  InterpolationControlSource onto the clip's track elements.
+  `viode key/keys`, MCP key_add/key_remove. End-to-end test proves a
+  keyframed fade-out renders (last audio window 15+ dB below first).
+  Waveform lanes + `viode levels` are the metering story.
+
+Phases 0–6 complete. Next: **Phase 7 — the pro-work gap** (transforms/
+PiP, color + scopes, ripple/roll/slip/slide, speed ramps, transition/
+title depth, export breadth, media relinking). See PLAN.md.
 
 ## Stack decisions (settled — don't relitigate casually)
 

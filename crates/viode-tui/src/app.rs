@@ -39,6 +39,10 @@ pub struct App {
     /// Terminal can draw real images (kitty/ghostty).
     pub graphics: bool,
     pub media: crate::media::MediaCache,
+    /// Area where inline video plays (set by ui::draw each frame).
+    pub preview_area: Option<ratatui::layout::Rect>,
+    preview: Option<crate::preview::Preview>,
+    image_refresh: bool,
     confirm_quit: bool,
     undo: Vec<Project>,
     redo: Vec<Project>,
@@ -63,6 +67,9 @@ impl App {
             show_help: false,
             graphics: crate::graphics::detect(),
             media: crate::media::MediaCache::new(&project_dir),
+            preview_area: None,
+            preview: None,
+            image_refresh: false,
             confirm_quit: false,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -136,10 +143,24 @@ impl App {
         }
     }
 
-    /// Reap finished mpv children so they don't linger as zombies.
+    /// Reap finished players so they don't linger as zombies.
     pub fn reap(&mut self) {
         self.children
             .retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
+        if self.preview.as_mut().is_some_and(|p| p.finished()) {
+            self.preview = None;
+            self.image_refresh = true;
+            self.message = "playback finished".into();
+        }
+    }
+
+    pub fn is_playing(&self) -> bool {
+        self.preview.is_some()
+    }
+
+    /// One-shot flag: the event loop must clear and re-emit images.
+    pub fn take_image_refresh(&mut self) -> bool {
+        std::mem::take(&mut self.image_refresh)
     }
 
     pub fn on_key(&mut self, code: KeyCode) -> Action {
@@ -169,7 +190,8 @@ impl App {
             KeyCode::Char('>') => self.shift(1),
             KeyCode::Char('u') => self.undo(),
             KeyCode::Char('U') => self.redo(),
-            KeyCode::Char(' ') => self.play_clip(),
+            KeyCode::Char(' ') => self.play_toggle(),
+            KeyCode::Char('x') => self.stop_preview(),
             KeyCode::Char('P') => self.preview_timeline(),
             KeyCode::Char('r') => self.render(),
             _ => {}
@@ -340,48 +362,85 @@ impl App {
         }
     }
 
-    fn play_clip(&mut self) {
-        let Some((index, src_time)) = self.source_time() else {
-            self.message = "nothing under playhead".into();
+    /// Space: start inline playback of the timeline from the playhead, or
+    /// toggle pause if already playing. Cuts-only path — instant, no
+    /// render — via an mpv EDL playlist drawn INSIDE the terminal.
+    fn play_toggle(&mut self) {
+        if let Some(p) = &self.preview {
+            p.toggle_pause();
+            return;
+        }
+        if self.project.main().clips.is_empty() {
+            self.message = "timeline is empty".into();
+            return;
+        }
+        let Some(area) = self.preview_area.filter(|a| a.width > 4 && a.height > 2) else {
+            self.message = "no room for the preview pane".into();
             return;
         };
-        let clip = &self.project.main().clips[index];
-        let src = viode_core::proxy_for(&self.project_dir, &clip.src)
-            .unwrap_or_else(|| self.project_dir.join(&clip.src));
-        let args = mpv_args(&src, src_time, clip.out);
-        match Command::new("mpv").args(&args).spawn() {
-            Ok(child) => {
-                self.children.push(child);
-                self.message = format!("playing clip {index} from {src_time}");
-            }
-            Err(e) => self.message = format!("mpv failed: {e}"),
+        let edl = crate::preview::edl_for(&self.project, &self.project_dir);
+        let edl_path = self.project_dir.join("cache").join("preview.edl");
+        let _ = std::fs::create_dir_all(edl_path.parent().unwrap());
+        if let Err(e) = std::fs::write(&edl_path, edl) {
+            self.message = format!("could not write EDL: {e}");
+            return;
+        }
+        self.spawn_preview(&edl_path, area, self.playhead.as_secs_f64());
+        if self.preview.is_some() {
+            self.message =
+                "playing (instant, cuts-only) — space pause · x stop · P composited".into();
         }
     }
 
+    fn spawn_preview(&mut self, target: &Path, area: ratatui::layout::Rect, start: f64) {
+        let sock = self.project_dir.join("cache").join("mpv.sock");
+        match crate::preview::Preview::spawn(target, area, start, sock) {
+            Ok(p) => self.preview = Some(p),
+            Err(e) => self.message = format!("mpv failed (is mpv installed?): {e}"),
+        }
+    }
+
+    fn stop_preview(&mut self) {
+        match self.preview.take() {
+            Some(mut p) => {
+                p.stop();
+                self.image_refresh = true;
+                self.message = "stopped".into();
+            }
+            None => self.message = "nothing playing".into(),
+        }
+    }
+
+    /// P: the accurate path — GES renders the full composite (tracks,
+    /// fades, titles, keyframes), then it plays inline.
     fn preview_timeline(&mut self) {
         if self.project.main().clips.is_empty() {
             self.message = "timeline is empty".into();
             return;
         }
+        let Some(area) = self.preview_area.filter(|a| a.width > 4 && a.height > 2) else {
+            self.message = "no room for the preview pane".into();
+            return;
+        };
+        self.stop_preview();
         // Proxied copy for speed where proxies exist.
         let mut preview = self.project.clone();
         for track in &mut preview.tracks {
-        for clip in &mut track.clips {
-            if let Some(p) = viode_core::proxy_for(&self.project_dir, &clip.src) {
-                clip.src = p;
+            for clip in &mut track.clips {
+                if let Some(p) = viode_core::proxy_for(&self.project_dir, &clip.src) {
+                    clip.src = p;
+                }
             }
         }
-        }
         let out = self.project_dir.join("cache").join("tui-preview.mp4");
-        self.message = "rendering preview…".into();
+        self.message = "rendering composited preview…".into();
         match GesBackend.render(&preview, &self.project_dir, &out) {
-            Ok(()) => match Command::new("mpv").arg(&out).spawn() {
-                Ok(child) => {
-                    self.children.push(child);
-                    self.message = "previewing timeline".into();
+            Ok(()) => {
+                self.spawn_preview(&out, area, 0.0);
+                if self.preview.is_some() {
+                    self.message = "playing composited preview — space pause · x stop".into();
                 }
-                Err(e) => self.message = format!("mpv failed: {e}"),
-            },
+            }
             Err(e) => self.message = format!("preview failed: {e}"),
         }
     }
@@ -401,17 +460,6 @@ impl App {
             Err(e) => self.message = format!("render failed: {e}"),
         }
     }
-}
-
-/// mpv invocation for a source segment — split out so tests can check it
-/// without spawning anything.
-pub fn mpv_args(src: &Path, start: Time, end: Time) -> Vec<String> {
-    vec![
-        format!("--start={}", start.as_secs_f64()),
-        format!("--end={}", end.as_secs_f64()),
-        "--force-window=immediate".into(),
-        src.display().to_string(),
-    ]
 }
 
 pub fn default_project_file() -> PathBuf {
@@ -437,15 +485,10 @@ mod tests {
         let mut project = Project::new("t", 30.0, [640, 360]);
         let t = |s| Time::from_secs_f64(s).unwrap();
         for _ in 0..2 {
-            project.main_mut().clips.push(Clip {
-                src: "media/a.mp4".into(),
-                in_: t(0.0),
-                out: t(2.0),
-                at: None,
-                transition: None,
-                effects: Vec::new(),
-                label: None,
-            });
+            project
+                .main_mut()
+                .clips
+                .push(Clip::media("media/a.mp4".into(), t(0.0), t(2.0)));
         }
         project.save(&file).unwrap();
         App::open(&file).unwrap()
@@ -550,10 +593,11 @@ mod tests {
     }
 
     #[test]
-    fn mpv_args_bound_the_segment() {
-        let args = mpv_args(Path::new("/x/a.mp4"), t(1.5), t(3.0));
-        assert!(args.contains(&"--start=1.5".to_string()));
-        assert!(args.contains(&"--end=3".to_string()));
-        assert_eq!(args.last().unwrap(), "/x/a.mp4");
+    fn playback_without_a_pane_or_player_reports_cleanly() {
+        let mut a = app();
+        a.on_key(KeyCode::Char(' '));
+        assert_eq!(a.message, "no room for the preview pane");
+        a.on_key(KeyCode::Char('x'));
+        assert_eq!(a.message, "nothing playing");
     }
 }

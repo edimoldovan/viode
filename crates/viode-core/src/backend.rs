@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use ges::prelude::*;
+use gst_controller::prelude::*;
 use gstreamer as gst;
+use gstreamer_controller as gst_controller;
 use gstreamer_editing_services as ges;
 use gstreamer_pbutils as gst_pbutils;
 
@@ -106,6 +108,44 @@ fn add_media_clip(
         ges_clip
             .add(&effect)
             .map_err(|e| RenderError::Gst(format!("could not add effect {desc:?}: {e}")))?;
+    }
+    if let Some(v) = clip.volume {
+        ges_clip
+            .set_child_property("volume", &v)
+            .map_err(|e| RenderError::Gst(format!("volume: {e}")))?;
+    }
+    if let Some(pan) = clip.pan {
+        let effect = ges::Effect::new(&format!("audiopanorama panorama={pan}"))
+            .map_err(|e| RenderError::Gst(format!("pan: {e}")))?;
+        ges_clip
+            .add(&effect)
+            .map_err(|e| RenderError::Gst(format!("pan: {e}")))?;
+    }
+    if !clip.keys.is_empty() {
+        let mut props: Vec<&str> = clip.keys.iter().map(|k| k.prop.as_str()).collect();
+        props.sort();
+        props.dedup();
+        for prop in props {
+            let cs = gst_controller::InterpolationControlSource::new();
+            cs.set_mode(gst_controller::InterpolationMode::Linear);
+            for k in clip.keys.iter().filter(|k| k.prop == prop) {
+                // Keyframe timestamps are SOURCE time — the coordinates
+                // control bindings evaluate in.
+                cs.set(k.at.to_clocktime(), k.value);
+            }
+            // Bindings attach to the track elements INSIDE the clip (the
+            // audio source owns "volume", the video source owns "alpha").
+            let bound = ges_clip
+                .children(true)
+                .iter()
+                .filter_map(|c| c.downcast_ref::<ges::TrackElement>())
+                .any(|te| te.set_control_source(&cs, prop, "direct"));
+            if !bound {
+                return Err(RenderError::Gst(format!(
+                    "could not bind keyframes to {prop:?} (valid: volume, alpha)"
+                )));
+            }
+        }
     }
     Ok(())
 }

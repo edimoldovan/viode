@@ -551,6 +551,101 @@ fn multicam_sync_and_take() {
 }
 
 #[test]
+fn audio_gain_pan_and_keyframes() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP audio_gain_pan_and_keyframes: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "aud", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("aud");
+    make_clip(&tmp.path().join("tone.mp4"), 2.0);
+    viode(&proj).args(["add", "../tone.mp4"]).assert().success();
+
+    // Gain, pan, and a fade-out (volume 1 -> 0 over the clip) land in TOML.
+    viode(&proj).args(["gain", "0", "0.8"]).assert().success();
+    viode(&proj).args(["pan", "0", "-0.5"]).assert().success();
+    viode(&proj)
+        .args(["key", "0", "volume", "0", "1.0"])
+        .assert()
+        .success();
+    viode(&proj)
+        .args(["key", "0", "volume", "2.0", "0.0"])
+        .assert()
+        .success();
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    for needle in ["volume = 0.8", "pan = -0.5", "[[track.clip.key]]", "prop = \"volume\""] {
+        assert!(toml.contains(needle), "missing {needle} in:\n{toml}");
+    }
+
+    // Validation speaks up.
+    viode(&proj)
+        .args(["key", "0", "sparkle", "1", "1"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("volume, alpha"));
+    viode(&proj)
+        .args(["pan", "0", "3"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("out of range"));
+
+    if !ges_available() {
+        eprintln!("SKIP audio keyframe render check: GES not installed");
+        return;
+    }
+    // The proof: rendered audio actually fades out. The tone starts loud
+    // and the volume keyframes take it to zero, so the last window must be
+    // drastically quieter than the first.
+    viode(&proj).arg("render").assert().success();
+    let levels_out = Proc::new("ffprobe") // ensure file exists before analysis
+        .arg(proj.join("renders/aud.mp4"))
+        .output()
+        .unwrap();
+    assert!(levels_out.status.success());
+    let levels = viode_core_levels(&proj.join("renders/aud.mp4"));
+    let (first, last) = (levels.first().unwrap().1, levels.last().unwrap().1);
+    assert!(
+        last < first - 15.0,
+        "fade-out did not render: first window {first} dB, last {last} dB"
+    );
+}
+
+/// RMS levels via the ffmpeg astats sidecar (same math as `viode levels`).
+fn viode_core_levels(path: &Path) -> Vec<(String, f64)> {
+    let out = Proc::new(assert_cmd::cargo::cargo_bin("viode"))
+        .args(["probe"])
+        .arg(path)
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    // Use the library through the CLI `levels` verb on a throwaway project
+    // is overkill here — shell out to ffmpeg astats directly.
+    let out = Proc::new("ffmpeg")
+        .args(["-hide_banner", "-nostats", "-i"])
+        .arg(path)
+        .args([
+            "-af",
+            "aresample=8000,asetnsamples=n=4000,astats=metadata=1:reset=1,\
+             ametadata=print:key=lavfi.astats.Overall.RMS_level:file=-",
+            "-f", "null", "-",
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut at = String::new();
+    let mut levels = Vec::new();
+    for line in stdout.lines() {
+        if let Some(rest) = line.split("pts_time:").nth(1) {
+            at = rest.split_whitespace().next().unwrap_or("").to_string();
+        } else if let Some(v) = line.strip_prefix("lavfi.astats.Overall.RMS_level=") {
+            levels.push((at.clone(), v.trim().parse::<f64>().unwrap_or(-100.0).max(-100.0)));
+        }
+    }
+    levels
+}
+
+#[test]
 fn render_produces_frame_accurate_output() {
     if !ffmpeg_available() || !ges_available() {
         eprintln!("SKIP render_produces_frame_accurate_output: ffmpeg/GES not installed");

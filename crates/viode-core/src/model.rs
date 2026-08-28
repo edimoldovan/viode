@@ -115,8 +115,25 @@ pub struct Clip {
     /// GStreamer effect descriptions, e.g. "videobalance saturation=0.0".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub effects: Vec<String>,
+    /// Audio gain, linear (1.0 = unity). None = untouched.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<f64>,
+    /// Stereo pan, -1.0 (left) .. 1.0 (right).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pan: Option<f64>,
+    /// Keyframes animating a property over SOURCE time (linear
+    /// interpolation): "volume" (0..2+) or "alpha" (0..1, video opacity).
+    #[serde(default, rename = "key", skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<Keyframe>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Keyframe {
+    pub prop: String,
+    pub at: Time,
+    pub value: f64,
 }
 
 impl Clip {
@@ -128,6 +145,9 @@ impl Clip {
             at: None,
             transition: None,
             effects: Vec::new(),
+            volume: None,
+            pan: None,
+            keys: Vec::new(),
             label: None,
         }
     }

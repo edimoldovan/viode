@@ -91,6 +91,50 @@ pub fn definitions() -> Vec<Value> {
             &["index", "enabled"],
         ),
         tool(
+            "gain_set",
+            "Set a clip's audio gain (linear, 1.0 = unity, 0.5 ≈ -6dB).",
+            json!({
+                "index": {"type": "integer"},
+                "volume": {"type": "number"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "volume"],
+        ),
+        tool(
+            "pan_set",
+            "Pan a clip's audio, -1.0 (left) .. 1.0 (right).",
+            json!({
+                "index": {"type": "integer"},
+                "pan": {"type": "number"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "pan"],
+        ),
+        tool(
+            "key_add",
+            "Add a keyframe animating volume (0..2) or alpha (0..1, video \
+             opacity) at a SOURCE time — linear interpolation between keys. \
+             This is how audio ducks and video fades in/out.",
+            json!({
+                "index": {"type": "integer"},
+                "prop": {"type": "string", "enum": ["volume", "alpha"]},
+                "at": time_schema,
+                "value": {"type": "number"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "prop", "at", "value"],
+        ),
+        tool(
+            "key_remove",
+            "Remove keyframe number k from a clip (see timeline_get).",
+            json!({
+                "index": {"type": "integer"},
+                "key": {"type": "integer"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "key"],
+        ),
+        tool(
             "fade_set",
             "Crossfade a main-track clip with the previous one (duration 0 \
              clears it).",
@@ -325,6 +369,60 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             ops::remove(p.main_mut(), index_arg(args, "index")?)?;
             Ok(())
         }),
+        "gain_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let volume = args.get("volume").and_then(Value::as_f64).context("missing volume")?;
+            if !(0.0..=10.0).contains(&volume) {
+                bail!("volume {volume} out of range (0..10)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.volume = (volume != 1.0).then_some(volume);
+            Ok(())
+        }),
+        "pan_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let pan = args.get("pan").and_then(Value::as_f64).context("missing pan")?;
+            if !(-1.0..=1.0).contains(&pan) {
+                bail!("pan {pan} out of range (-1..1)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.pan = (pan != 0.0).then_some(pan);
+            Ok(())
+        }),
+        "key_add" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let prop = str_arg(args, "prop")?.to_string();
+            if prop != "volume" && prop != "alpha" {
+                bail!("unknown property {prop:?} (volume, alpha)");
+            }
+            let value = args.get("value").and_then(Value::as_f64).context("missing value")?;
+            if value < 0.0 {
+                bail!("keyframe values must be >= 0");
+            }
+            let at = time_req(args, "at")?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.keys.push(viode_core::Keyframe { prop, at, value });
+            c.keys.sort_by(|a, b| (a.prop.clone(), a.at).cmp(&(b.prop.clone(), b.at)));
+            Ok(())
+        }),
+        "key_remove" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let k = index_arg(args, "key")?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            if k >= c.keys.len() {
+                bail!("keyframe {k} out of range");
+            }
+            c.keys.remove(k);
+            Ok(())
+        }),
         "fade_set" => edit(server, |p| {
             let d = time_req(args, "duration")?;
             let d = (d != Time::ZERO).then_some(d);
@@ -498,6 +596,11 @@ fn timeline_json(project: &Project) -> Value {
                     "len": c.len().to_string(),
                     "transition": c.transition.map(|t| t.to_string()),
                     "effects": c.effects,
+                    "volume": c.volume,
+                    "pan": c.pan,
+                    "keys": c.keys.iter().map(|k| json!({
+                        "prop": k.prop, "at": k.at.to_string(), "value": k.value,
+                    })).collect::<Vec<_>>(),
                 })).collect::<Vec<_>>(),
             })
         })
