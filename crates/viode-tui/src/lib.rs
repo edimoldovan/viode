@@ -32,6 +32,7 @@ pub fn run(project_file: &Path) -> Result<()> {
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut shown: Vec<Placement> = Vec::new();
+    let mut playing_ticks = 0u32;
     loop {
         app.reap();
         app.media.pump();
@@ -47,10 +48,15 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             terminal.swap_buffers();
             terminal.current_buffer_mut().reset();
             terminal.swap_buffers();
-            terminal.draw(|f| {
-                ui::draw(f, app);
-            })?;
-            shown.clear(); // our images are gone; re-emit after playback
+            let mut placements = Vec::new();
+            terminal.draw(|f| placements = ui::draw(f, app))?;
+            shown.clear(); // mpv's startup clear ate our images
+            // Half a second in (past that clear), put the filmstrips
+            // back: transmit WITHOUT delete-all so mpv's frame survives.
+            playing_ticks += 1;
+            if playing_ticks == 5 {
+                emit_images(&placements, false)?;
+            }
             if !event::poll(Duration::from_millis(100))? {
                 continue;
             }
@@ -65,6 +71,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             }
             continue;
         }
+        playing_ticks = 0;
         if app.take_image_refresh() {
             // The player is gone: wipe its frames and repaint everything.
             let mut out = std::io::stdout();
@@ -80,7 +87,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
         // Images are independent of the text buffer: re-emit only when the
         // set of placements actually changed (edit, resize, thumb ready).
         if app.graphics && placements != shown {
-            emit_images(&placements)?;
+            emit_images(&placements, true)?;
             shown = placements;
         }
 
@@ -99,9 +106,11 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
     }
 }
 
-fn emit_images(placements: &[Placement]) -> Result<()> {
+fn emit_images(placements: &[Placement], clear_first: bool) -> Result<()> {
     let mut out = std::io::stdout();
-    out.write_all(graphics::delete_all())?;
+    if clear_first {
+        out.write_all(graphics::delete_all())?;
+    }
     for p in placements {
         let Ok(data) = std::fs::read(&p.png) else {
             continue;
