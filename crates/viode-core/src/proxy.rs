@@ -45,17 +45,32 @@ pub fn build_proxy(
         std::fs::create_dir_all(dir)?;
     }
 
-    let out = Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-i"])
-        .arg(&src)
-        .args([
-            "-vf",
-            &format!("scale=-2:'min({PROXY_HEIGHT},ih)'"),
+    // Opt-B: hardware path is OPT-IN because it is machine-dependent —
+    // `viode bench` measures which path wins on this box.
+    let hw = std::env::var("VIODE_HWACCEL").ok().filter(|v| v == "vaapi");
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-loglevel", "error"]);
+    if hw.is_some() {
+        cmd.args([
+            "-hwaccel", "vaapi",
+            "-hwaccel_device", "/dev/dri/renderD128",
+            "-hwaccel_output_format", "vaapi",
+        ]);
+    }
+    cmd.arg("-i").arg(&src);
+    if hw.is_some() {
+        cmd.args([
+            "-vf", &format!("scale_vaapi=w=-2:h={PROXY_HEIGHT}"),
+            "-c:v", "h264_vaapi", "-qp", "28",
+        ]);
+    } else {
+        cmd.args([
+            "-vf", &format!("scale=-2:'min({PROXY_HEIGHT},ih)'"),
             "-c:v", "libx264", "-crf", "28", "-preset", "veryfast",
-            "-c:a", "aac", "-b:a", "128k",
-        ])
-        .arg(&dest)
-        .output()?;
+        ]);
+    }
+    cmd.args(["-c:a", "aac", "-b:a", "128k"]);
+    let out = cmd.arg(&dest).output()?;
     if !out.status.success() {
         let _ = std::fs::remove_file(&dest); // no half-written proxies
         return Err(ProxyError::Ffmpeg(
@@ -64,6 +79,44 @@ pub fn build_proxy(
         ));
     }
     Ok(dest)
+}
+
+/// Build proxies for many sources CONCURRENTLY (bounded pool). Each
+/// ffmpeg already multithreads internally, so a small pool saturates the
+/// machine without starving it. Returns per-source results in input order.
+pub fn build_all(
+    project_dir: &Path,
+    sources: &[PathBuf],
+    force: bool,
+    jobs: usize,
+) -> Vec<(PathBuf, Result<PathBuf, ProxyError>)> {
+    let jobs = jobs.max(1);
+    let mut results: Vec<Option<(PathBuf, Result<PathBuf, ProxyError>)>> =
+        (0..sources.len()).map(|_| None).collect();
+    let mut i = 0;
+    while i < sources.len() {
+        let batch = &sources[i..(i + jobs).min(sources.len())];
+        let handles: Vec<_> = batch
+            .iter()
+            .map(|src| {
+                let (dir, src) = (project_dir.to_path_buf(), src.clone());
+                std::thread::spawn(move || {
+                    let r = build_proxy(&dir, &src, force);
+                    (src, r)
+                })
+            })
+            .collect();
+        for (k, h) in handles.into_iter().enumerate() {
+            results[i + k] = Some(h.join().unwrap_or_else(|_| {
+                (
+                    batch[k].clone(),
+                    Err(ProxyError::Ffmpeg(batch[k].display().to_string(), "worker panicked".into())),
+                )
+            }));
+        }
+        i += batch.len();
+    }
+    results.into_iter().map(|r| r.unwrap()).collect()
 }
 
 #[cfg(test)]

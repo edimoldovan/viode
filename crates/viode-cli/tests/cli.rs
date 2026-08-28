@@ -775,6 +775,21 @@ fn phase7_pro_editing_tools() {
 }
 
 #[test]
+fn bench_prints_a_verdict() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP bench_prints_a_verdict: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    viode(tmp.path())
+        .args(["bench", "a.mp4", "--secs", "2"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("verdict:"));
+}
+
+#[test]
 fn render_produces_frame_accurate_output() {
     if !ffmpeg_available() || !ges_available() {
         eprintln!("SKIP render_produces_frame_accurate_output: ffmpeg/GES not installed");

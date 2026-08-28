@@ -249,6 +249,17 @@ pub fn definitions() -> Vec<Value> {
             }),
             &[],
         ),
+        tool(
+            "bench",
+            "Measure software vs VA-API encoding on a sample of the given \
+             file and report which path wins on THIS machine (whether to \
+             set VIODE_HWACCEL=vaapi).",
+            json!({
+                "path": {"type": "string"},
+                "secs": {"type": "integer", "default": 30},
+            }),
+            &["path"],
+        ),
         tool("queue_list", "List queued render jobs.", json!({}), &[]),
         tool("queue_run", "Run every queued render job in order.", json!({}), &[]),
         tool("queue_clear", "Clear the render queue.", json!({}), &[]),
@@ -638,6 +649,7 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
         "media_missing" => media_missing(server),
         "relink" => relink_tool(server, args),
         "queue_add" => queue_add(server, args),
+        "bench" => bench_tool(args),
         "queue_list" => queue_list(server),
         "queue_run" => queue_run(server),
         "queue_clear" => queue_clear(server),
@@ -941,11 +953,15 @@ fn f64_arg(args: &Value, key: &str, default: f64) -> f64 {
 
 fn silence_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (index, clip, src) = clip_and_source(server, args)?;
-    let silences = viode_core::detect_silences(
+    let (_, dir) = require_project(server)?;
+    let silences = viode_core::audio_scan(
+        &dir,
         &src,
         f64_arg(args, "threshold_db", -35.0),
         f64_arg(args, "min_duration", 0.5),
-    )?;
+        viode_core::DEFAULT_LEVEL_WINDOW,
+    )?
+    .silences;
     let in_clip: Vec<Value> = silences
         .iter()
         .filter(|(s, e)| *e > clip.in_ && *s < clip.out)
@@ -960,11 +976,15 @@ fn silence_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
 
 fn silence_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     let (index, _, src) = clip_and_source(server, args)?;
-    let silences = viode_core::detect_silences(
+    let (_, dir) = require_project(server)?;
+    let silences = viode_core::audio_scan(
+        &dir,
         &src,
         f64_arg(args, "threshold_db", -35.0),
         f64_arg(args, "min_duration", 0.5),
-    )?;
+        viode_core::DEFAULT_LEVEL_WINDOW,
+    )?
+    .silences;
     if silences.is_empty() {
         return Ok(text("no silences found — nothing cut"));
     }
@@ -983,6 +1003,9 @@ fn silence_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
 
 fn scene_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (index, clip, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    // O3: scene scores don't need original pixels — use the proxy.
+    let src = viode_core::proxy_for(&dir, &clip.src).unwrap_or(src);
     let scenes = viode_core::detect_scenes(&src, f64_arg(args, "threshold", 0.4))?;
     let in_clip: Vec<String> = scenes
         .iter()
@@ -997,7 +1020,10 @@ fn scene_detect(server: &Server, args: &Value) -> Result<Vec<Value>> {
 }
 
 fn scene_split(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
-    let (index, _, src) = clip_and_source(server, args)?;
+    let (index, clip, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    let src = viode_core::proxy_for(&dir, &clip.src).unwrap_or(src);
+    let _ = &clip;
     let scenes = viode_core::detect_scenes(&src, f64_arg(args, "threshold", 0.4))?;
     let (file, _) = require_project(server)?;
     let mut project = Project::load(&file)?;
@@ -1234,6 +1260,45 @@ fn queue_add(server: &Server, args: &Value) -> Result<Vec<Value>> {
     Ok(text(format!("queued job {} — queue_run executes all", q.jobs.len())))
 }
 
+fn bench_tool(args: &Value) -> Result<Vec<Value>> {
+    let file = PathBuf::from(str_arg(args, "path")?);
+    let secs = args.get("secs").and_then(Value::as_u64).unwrap_or(30);
+    let run = |label: &str, pre: &[&str], post: &[&str]| -> Option<f64> {
+        let tmp = std::env::temp_dir().join(format!("viode-bench-{label}.mp4"));
+        let start = std::time::Instant::now();
+        let ok = Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error"])
+            .args(pre)
+            .args(["-t", &secs.to_string(), "-i"])
+            .arg(&file)
+            .args(post)
+            .arg(&tmp)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        let elapsed = start.elapsed().as_secs_f64();
+        let _ = std::fs::remove_file(&tmp);
+        ok.then_some(elapsed)
+    };
+    let sw = run("sw", &[], &["-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"]);
+    let hw = run(
+        "hw",
+        &["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128", "-hwaccel_output_format", "vaapi"],
+        &["-vf", "scale_vaapi=w=-2:h=540", "-c:v", "h264_vaapi", "-qp", "28", "-an"],
+    );
+    let verdict = match (sw, hw) {
+        (Some(s), Some(h)) if h < s => format!(
+            "VA-API wins {:.1}x — set VIODE_HWACCEL=vaapi on this machine", s / h),
+        (Some(s), Some(h)) => format!(
+            "software wins {:.1}x — leave VIODE_HWACCEL unset", h / s),
+        (Some(_), None) => "VA-API unavailable — software stays the path".into(),
+        _ => bail!("benchmark could not run either path"),
+    };
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "software_secs": sw, "vaapi_secs": hw, "verdict": verdict,
+    }))?))
+}
+
 fn queue_list(server: &Server) -> Result<Vec<Value>> {
     let (_, dir) = require_project(server)?;
     let q = viode_core::queue::load(&dir)?;
@@ -1298,21 +1363,31 @@ fn proxy_build(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let mut sources: Vec<_> = project.tracks.iter().flat_map(|t| t.clips.iter().map(|c| c.src.clone())).collect();
     sources.sort();
     sources.dedup();
-    let mut lines = Vec::new();
-    for src in &sources {
-        let dest = viode_core::build_proxy(&dir, src, force)?;
-        lines.push(format!("{} -> {}", src.display(), dest.display()));
-    }
-    if lines.is_empty() {
+    if sources.is_empty() {
         return Ok(text("timeline references no media"));
+    }
+    let mut lines = Vec::new();
+    for (src, result) in viode_core::build_all(&dir, &sources, force, 3) {
+        match result {
+            Ok(dest) => lines.push(format!("{} -> {}", src.display(), dest.display())),
+            Err(e) => lines.push(format!("{} FAILED: {e}", src.display())),
+        }
     }
     Ok(text(lines.join("\n")))
 }
 
 fn audio_levels_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (index, clip, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
     let window = f64_arg(args, "window", 0.5);
-    let levels: Vec<Value> = viode_core::audio_levels(&src, window)?
+    let levels: Vec<Value> = viode_core::audio_scan(
+        &dir,
+        &src,
+        viode_core::DEFAULT_NOISE_DB,
+        viode_core::DEFAULT_MIN_SILENCE,
+        window,
+    )?
+    .levels
         .into_iter()
         .filter(|(t, _)| *t >= clip.in_ && *t < clip.out)
         .map(|(t, db)| json!({"at": t.to_string(), "rms_db": db}))

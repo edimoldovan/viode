@@ -154,6 +154,13 @@ enum Cmd {
         #[arg(allow_negative_numbers = true)]
         delta: f64,
     },
+    /// Measure software vs VA-API proxy encoding on YOUR footage and
+    /// print which path wins on this machine
+    Bench {
+        file: PathBuf,
+        #[arg(long, default_value_t = 30)]
+        secs: u32,
+    },
     /// LIVE composited preview: play the timeline in a window, no render
     Play {
         #[arg(long, default_value = "0")]
@@ -532,6 +539,7 @@ fn run() -> Result<()> {
             println!("slid clip {index} by {delta}s (total {})", p.total_duration());
             Ok(())
         }),
+        Cmd::Bench { file, secs } => cmd_bench(&file, secs),
         Cmd::Play { from } => {
             let project = Project::load(&cli.project)?;
             let dir = project_dir(&cli.project);
@@ -678,7 +686,15 @@ fn run() -> Result<()> {
         Cmd::Levels { index, window } => {
             let project = Project::load(&cli.project)?;
             let src = clip_source(&cli.project, &project, index)?;
-            for (at, db) in viode_core::audio_levels(&src, window)? {
+            let dir = project_dir(&cli.project);
+            let scan = viode_core::audio_scan(
+                &dir,
+                &src,
+                viode_core::DEFAULT_NOISE_DB,
+                viode_core::DEFAULT_MIN_SILENCE,
+                window,
+            )?;
+            for (at, db) in scan.levels {
                 println!("{at}  {db:>7.1} dB");
             }
             Ok(())
@@ -689,7 +705,7 @@ fn run() -> Result<()> {
         }
         Cmd::Scenes { index, threshold } => cmd_scenes(&cli.project, index, threshold),
         Cmd::SplitScenes { index, threshold } => with_project(&cli.project, |p| {
-            let src = clip_source_owned(&cli.project, p, index)?;
+            let src = analysis_source(&cli.project, p, index)?;
             let scenes = viode_core::detect_scenes(&src, threshold)?;
             let n = ops::split_at_source_times(p.main_mut(), index, &scenes)?;
             println!("split clip {index} into {n} segments at {} scene changes", scenes.len());
@@ -1021,11 +1037,24 @@ fn clip_source_owned(project_file: &Path, project: &Project, index: usize) -> Re
     clip_source(project_file, project, index)
 }
 
+/// O3: video ANALYSIS runs on the 540p proxy when one exists — scene
+/// scores don't need 4K pixels. Audio analysis stays on originals.
+fn analysis_source(project_file: &Path, project: &Project, index: usize) -> Result<PathBuf> {
+    let clip = project
+        .main()
+        .clips
+        .get(index)
+        .with_context(|| format!("clip index {index} out of range"))?;
+    let dir = project_dir(project_file);
+    Ok(viode_core::proxy_for(&dir, &clip.src).unwrap_or_else(|| dir.join(&clip.src)))
+}
+
 fn cmd_silences(project_file: &Path, index: usize, threshold: f64, min: f64) -> Result<()> {
     let project = Project::load(project_file)?;
     let src = clip_source(project_file, &project, index)?;
     let clip = &project.main().clips[index];
-    let silences = viode_core::detect_silences(&src, threshold, min)?;
+    let dir = project_dir(project_file);
+    let silences = viode_core::audio_scan(&dir, &src, threshold, min, viode_core::DEFAULT_LEVEL_WINDOW)?.silences;
     let in_clip: Vec<_> = silences
         .iter()
         .filter(|(s, e)| *e > clip.in_ && *s < clip.out)
@@ -1051,7 +1080,9 @@ fn cmd_cut_silences(
 ) -> Result<()> {
     let mut project = Project::load(project_file)?;
     let src = clip_source(project_file, &project, index)?;
-    let silences = viode_core::detect_silences(&src, threshold, min)?;
+    let dir = project_dir(project_file);
+    let silences =
+        viode_core::audio_scan(&dir, &src, threshold, min, viode_core::DEFAULT_LEVEL_WINDOW)?.silences;
     if silences.is_empty() {
         println!("no silences to cut");
         return Ok(());
@@ -1074,7 +1105,7 @@ fn cmd_cut_silences(
 
 fn cmd_scenes(project_file: &Path, index: usize, threshold: f64) -> Result<()> {
     let project = Project::load(project_file)?;
-    let src = clip_source(project_file, &project, index)?;
+    let src = analysis_source(project_file, &project, index)?;
     let scenes = viode_core::detect_scenes(&src, threshold)?;
     if scenes.is_empty() {
         println!("no scene changes above {threshold} in clip {index}");
@@ -1256,6 +1287,58 @@ fn cmd_media(project_file: &Path, cmd: MediaCmd) -> Result<()> {
     }
 }
 
+/// Opt-B honesty tool: measure both encode paths on the user's OWN
+/// footage; the winner (and the env to set) is printed, never assumed.
+fn cmd_bench(file: &Path, secs: u32) -> Result<()> {
+    let run = |label: &str, args: &[&str]| -> Result<Option<f64>> {
+        let tmp = std::env::temp_dir().join(format!("viode-bench-{label}.mp4"));
+        let start = std::time::Instant::now();
+        let status = std::process::Command::new("ffmpeg")
+            .args(["-y", "-loglevel", "error"])
+            .args(args.iter().take_while(|a| **a != "-i"))
+            .args(["-t", &secs.to_string(), "-i"])
+            .arg(file)
+            .args(args.iter().skip_while(|a| **a != "-i").skip(1))
+            .arg(&tmp)
+            .status()?;
+        let elapsed = start.elapsed().as_secs_f64();
+        let _ = fs::remove_file(&tmp);
+        if status.success() {
+            println!("  {label:<28} {elapsed:>7.1}s");
+            Ok(Some(elapsed))
+        } else {
+            println!("  {label:<28}  failed (path unavailable)");
+            Ok(None)
+        }
+    };
+    println!("benchmarking {} ({secs}s sample):", file.display());
+    let sw = run(
+        "software (libx264)",
+        &["-i", "-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"],
+    )?;
+    let hw = run(
+        "vaapi (hw decode+encode)",
+        &[
+            "-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128",
+            "-hwaccel_output_format", "vaapi",
+            "-i", "-vf", "scale_vaapi=w=-2:h=540", "-c:v", "h264_vaapi", "-qp", "28", "-an",
+        ],
+    )?;
+    match (sw, hw) {
+        (Some(s), Some(h)) if h < s => println!(
+            "verdict: VA-API wins {:.1}x on this machine — export VIODE_HWACCEL=vaapi",
+            s / h
+        ),
+        (Some(s), Some(h)) => println!(
+            "verdict: software wins {:.1}x on this machine — leave VIODE_HWACCEL unset",
+            h / s
+        ),
+        (Some(_), None) => println!("verdict: VA-API unavailable — software stays the path"),
+        _ => bail!("benchmark could not run either path"),
+    }
+    Ok(())
+}
+
 fn cmd_render(
     project_file: &Path,
     output: Option<PathBuf>,
@@ -1368,15 +1451,32 @@ fn cmd_proxy(project_file: &Path, force: bool) -> Result<()> {
         println!("timeline references no media");
         return Ok(());
     }
-    for src in &sources {
-        let started = std::time::Instant::now();
-        let dest = viode_core::build_proxy(&dir, src, force)?;
-        println!(
-            "{} -> {} ({:.1}s)",
-            src.display(),
-            dest.strip_prefix(&dir).unwrap_or(&dest).display(),
-            started.elapsed().as_secs_f64()
-        );
+    let started = std::time::Instant::now();
+    // O1: per-file parallelism — each ffmpeg multithreads, a pool of 3
+    // keeps the machine busy across many sources.
+    let results = viode_core::build_all(&dir, &sources, force, 3);
+    let mut failed = 0;
+    for (src, result) in results {
+        match result {
+            Ok(dest) => println!(
+                "{} -> {}",
+                src.display(),
+                dest.strip_prefix(&dir).unwrap_or(&dest).display()
+            ),
+            Err(e) => {
+                failed += 1;
+                eprintln!("{}: {e}", src.display());
+            }
+        }
+    }
+    println!(
+        "{} proxie(s) in {:.1}s{}",
+        sources.len() - failed,
+        started.elapsed().as_secs_f64(),
+        if failed > 0 { " (with failures)" } else { "" }
+    );
+    if failed > 0 {
+        bail!("{failed} proxy build(s) failed");
     }
     Ok(())
 }
