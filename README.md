@@ -17,6 +17,23 @@ the whole editor over [MCP](https://modelcontextprotocol.io) — including
 edit is a git repo, your cuts are diffs, and "remove the dead air from
 this episode" is a sentence, not an afternoon.
 
+## Where Viode already beats Premiere
+
+|  | Premiere | Viode |
+|---|---|---|
+| Your edit | opaque `.prproj` blob | plain TOML — `git diff` a cut, `git revert` a mistake, review an edit like a PR |
+| Remove dead air | click through a 3-hour timeline | `viode cut-silences 0` — one command, padding included |
+| Edit by transcript | cloud-tethered, subscription-gated | whisper.cpp on your machine: delete the sentence, the video cuts itself |
+| Multicam sync | import, create sequence, wait | `viode angle cam2.mp4` — audio cross-correlation, no clap slate |
+| Automation | ExtendScript, mostly abandoned | every feature is a CLI verb; cron it, pipe it, script it |
+| AI | none that matters | a first-class MCP client that can cut, trim, *look at frames*, read waveforms, and render |
+| Loudness-correct exports | know the right LUFS, configure it | `viode render --preset podcast` — two-pass EBU R128 built in |
+| Price | rent, forever | MIT, forever |
+
+Premiere still wins on live playback, audio mixing, keyframes, color, and
+twenty years of trim tools — that gap is the roadmap ([PLAN.md](PLAN.md),
+Phases 6–7). The table above is the part they can't easily copy.
+
 ```
 ┌─ demo * ── 1280x720 @ 30 fps ── 3 clips ── total 00:00:05.000 ─────────┐
 │                    ▼                                                   │
