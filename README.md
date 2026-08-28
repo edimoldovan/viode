@@ -338,6 +338,7 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
 | 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
 | 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth, live preview | ✅ |
+| 8 | The GUI: native multiplatform client (egui), live preview, drag editing | ⏳ |
 
 ## Development
 
