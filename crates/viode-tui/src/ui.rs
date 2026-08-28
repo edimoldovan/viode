@@ -46,10 +46,7 @@ pub fn draw(f: &mut Frame, app: &mut App) -> Vec<Placement> {
         Constraint::Length(1),
     ])
     .areas(f.area());
-    app.preview_area = Some(preview);
-    if app.is_playing() {
-        f.render_widget(block("preview"), preview);
-    }
+    let _ = preview; // reserved: future scopes/meters pane
 
     draw_header(f, &*app, header);
     let placements = draw_timeline(f, app, timeline);
@@ -370,7 +367,7 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let widget = if app.message.is_empty() {
         Paragraph::new(
-            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play/pause  x stop  P composited  r render  ? help  q quit",
+            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  P composited  r render  ? help  q quit",
         )
         .style(Style::default().fg(Color::DarkGray))
     } else {
@@ -385,8 +382,9 @@ fn draw_help(f: &mut Frame) {
   playhead   h/l ±0.1s   H/L ±1s   j/k clip edges
   edit       s split   d delete   i trim start   o trim end
              </> move clip   u undo   U redo
-  view       space play timeline inline (instant, cuts-only)
-             x stop   P composited preview (tracks/fades/titles)
+  view       space plays the timeline full-terminal from the
+             playhead (instant, cuts-only; q returns here).
+             P renders the composite first (tracks/fades/keys).
   project    w save   r render   q quit
 
   The playhead selects: verbs act on the main-track clip

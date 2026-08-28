@@ -1,14 +1,11 @@
 //! Inline preview playback: mpv with --vo=kitty renders video INSIDE the
-//! terminal, positioned over the TUI's preview area. Cuts-only timelines
-//! play instantly through an mpv EDL playlist (no rendering); we drive the
-//! player over its IPC socket.
+//! terminal. The TUI suspends, mpv owns the terminal (its real controls:
+//! space pause, arrows seek, q returns to the editor), the TUI restores.
+//! Cuts-only timelines play instantly through an mpv EDL playlist — no
+//! rendering step at all.
 
-use std::io::Write;
-use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-
-use ratatui::layout::Rect;
+use std::path::Path;
+use std::process::Command;
 
 use viode_core::Project;
 
@@ -31,63 +28,16 @@ pub fn edl_for(project: &Project, project_dir: &Path) -> String {
     edl
 }
 
-pub struct Preview {
-    child: Child,
-    sock: PathBuf,
-}
-
-impl Preview {
-    /// Play `target` (an .edl or a rendered file) inside `area`, starting
-    /// at `start_secs`.
-    pub fn spawn(target: &Path, area: Rect, start_secs: f64, sock: PathBuf) -> std::io::Result<Preview> {
-        let _ = std::fs::remove_file(&sock);
-        let child = Command::new("mpv")
-            .arg("--vo=kitty")
-            // kitty vo coordinates are 1-based terminal cells.
-            .arg(format!("--vo-kitty-left={}", area.x + 1))
-            .arg(format!("--vo-kitty-top={}", area.y + 1))
-            .arg(format!("--vo-kitty-cols={}", area.width))
-            .arg(format!("--vo-kitty-rows={}", area.height))
-            .arg("--really-quiet")
-            .arg("--no-input-terminal") // our event loop owns the keyboard
-            .arg(format!("--input-ipc-server={}", sock.display()))
-            .arg(format!("--start={start_secs}"))
-            .arg(target)
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()?;
-        Ok(Preview { child, sock })
-    }
-
-    /// Fire-and-forget IPC command, e.g. ["cycle", "pause"].
-    pub fn command(&self, args: &[&str]) {
-        if let Ok(mut stream) = UnixStream::connect(&self.sock) {
-            let quoted: Vec<String> = args.iter().map(|a| format!("{a:?}")).collect();
-            let _ = writeln!(stream, "{{\"command\":[{}]}}", quoted.join(","));
-        }
-    }
-
-    pub fn toggle_pause(&self) {
-        self.command(&["cycle", "pause"]);
-    }
-
-    /// True if mpv already exited on its own (end of playlist, error).
-    pub fn finished(&mut self) -> bool {
-        matches!(self.child.try_wait(), Ok(Some(_)))
-    }
-
-    pub fn stop(&mut self) {
-        self.command(&["quit"]);
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = std::fs::remove_file(&self.sock);
-    }
-}
-
-impl Drop for Preview {
-    fn drop(&mut self) {
-        self.stop();
-    }
+/// Play `target` (an .edl or a rendered file) full-terminal, blocking
+/// until the user quits mpv. The caller must have restored the terminal.
+pub fn play_blocking(target: &Path, start_secs: f64) -> std::io::Result<()> {
+    Command::new("mpv")
+        .arg("--vo=kitty")
+        .arg(format!("--start={start_secs}"))
+        .arg("--really-quiet")
+        .arg(target)
+        .status()
+        .map(|_| ())
 }
 
 #[cfg(test)]

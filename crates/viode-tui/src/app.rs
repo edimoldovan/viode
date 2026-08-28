@@ -26,6 +26,8 @@ const BIG_STEP: u64 = 1_000_000_000; // 1s
 pub enum Action {
     None,
     Quit,
+    /// Suspend the TUI and play this file/EDL full-terminal from `start`.
+    Play(PathBuf, f64),
 }
 
 pub struct App {
@@ -39,10 +41,6 @@ pub struct App {
     /// Terminal can draw real images (kitty/ghostty).
     pub graphics: bool,
     pub media: crate::media::MediaCache,
-    /// Area where inline video plays (set by ui::draw each frame).
-    pub preview_area: Option<ratatui::layout::Rect>,
-    preview: Option<crate::preview::Preview>,
-    image_refresh: bool,
     confirm_quit: bool,
     undo: Vec<Project>,
     redo: Vec<Project>,
@@ -67,9 +65,6 @@ impl App {
             show_help: false,
             graphics: crate::graphics::detect(),
             media: crate::media::MediaCache::new(&project_dir),
-            preview_area: None,
-            preview: None,
-            image_refresh: false,
             confirm_quit: false,
             undo: Vec::new(),
             redo: Vec::new(),
@@ -147,20 +142,6 @@ impl App {
     pub fn reap(&mut self) {
         self.children
             .retain_mut(|c| !matches!(c.try_wait(), Ok(Some(_))));
-        if self.preview.as_mut().is_some_and(|p| p.finished()) {
-            self.preview = None;
-            self.image_refresh = true;
-            self.message = "playback finished".into();
-        }
-    }
-
-    pub fn is_playing(&self) -> bool {
-        self.preview.is_some()
-    }
-
-    /// One-shot flag: the event loop must clear and re-emit images.
-    pub fn take_image_refresh(&mut self) -> bool {
-        std::mem::take(&mut self.image_refresh)
     }
 
     pub fn on_key(&mut self, code: KeyCode) -> Action {
@@ -190,9 +171,8 @@ impl App {
             KeyCode::Char('>') => self.shift(1),
             KeyCode::Char('u') => self.undo(),
             KeyCode::Char('U') => self.redo(),
-            KeyCode::Char(' ') => self.play_toggle(),
-            KeyCode::Char('x') => self.stop_preview(),
-            KeyCode::Char('P') => self.preview_timeline(),
+            KeyCode::Char(' ') => return self.play(),
+            KeyCode::Char('P') => return self.preview_timeline(),
             KeyCode::Char('r') => self.render(),
             _ => {}
         }
@@ -362,67 +342,32 @@ impl App {
         }
     }
 
-    /// Space: start inline playback of the timeline from the playhead, or
-    /// toggle pause if already playing. Cuts-only path — instant, no
-    /// render — via an mpv EDL playlist drawn INSIDE the terminal.
-    fn play_toggle(&mut self) {
-        if let Some(p) = &self.preview {
-            p.toggle_pause();
-            return;
-        }
+    /// Space: play the timeline from the playhead — instant, zero-render,
+    /// via an mpv EDL playlist of the main-track cuts. The event loop
+    /// suspends the TUI and hands mpv the terminal.
+    fn play(&mut self) -> Action {
         if self.project.main().clips.is_empty() {
             self.message = "timeline is empty".into();
-            return;
+            return Action::None;
         }
-        let Some(area) = self.preview_area.filter(|a| a.width > 4 && a.height > 2) else {
-            self.message = "no room for the preview pane".into();
-            return;
-        };
         let edl = crate::preview::edl_for(&self.project, &self.project_dir);
         let edl_path = self.project_dir.join("cache").join("preview.edl");
         let _ = std::fs::create_dir_all(edl_path.parent().unwrap());
         if let Err(e) = std::fs::write(&edl_path, edl) {
             self.message = format!("could not write EDL: {e}");
-            return;
+            return Action::None;
         }
-        self.spawn_preview(&edl_path, area, self.playhead.as_secs_f64());
-        if self.preview.is_some() {
-            self.message =
-                "playing (instant, cuts-only) — space pause · x stop · P composited".into();
-        }
-    }
-
-    fn spawn_preview(&mut self, target: &Path, area: ratatui::layout::Rect, start: f64) {
-        let sock = self.project_dir.join("cache").join("mpv.sock");
-        match crate::preview::Preview::spawn(target, area, start, sock) {
-            Ok(p) => self.preview = Some(p),
-            Err(e) => self.message = format!("mpv failed (is mpv installed?): {e}"),
-        }
-    }
-
-    fn stop_preview(&mut self) {
-        match self.preview.take() {
-            Some(mut p) => {
-                p.stop();
-                self.image_refresh = true;
-                self.message = "stopped".into();
-            }
-            None => self.message = "nothing playing".into(),
-        }
+        self.message = "played (cuts-only) — P for the full composite".into();
+        Action::Play(edl_path, self.playhead.as_secs_f64())
     }
 
     /// P: the accurate path — GES renders the full composite (tracks,
-    /// fades, titles, keyframes), then it plays inline.
-    fn preview_timeline(&mut self) {
+    /// fades, titles, keyframes), then it plays full-terminal.
+    fn preview_timeline(&mut self) -> Action {
         if self.project.main().clips.is_empty() {
             self.message = "timeline is empty".into();
-            return;
+            return Action::None;
         }
-        let Some(area) = self.preview_area.filter(|a| a.width > 4 && a.height > 2) else {
-            self.message = "no room for the preview pane".into();
-            return;
-        };
-        self.stop_preview();
         // Proxied copy for speed where proxies exist.
         let mut preview = self.project.clone();
         for track in &mut preview.tracks {
@@ -436,12 +381,13 @@ impl App {
         self.message = "rendering composited preview…".into();
         match GesBackend.render(&preview, &self.project_dir, &out) {
             Ok(()) => {
-                self.spawn_preview(&out, area, 0.0);
-                if self.preview.is_some() {
-                    self.message = "playing composited preview — space pause · x stop".into();
-                }
+                self.message = "played composite".into();
+                Action::Play(out, 0.0)
             }
-            Err(e) => self.message = format!("preview failed: {e}"),
+            Err(e) => {
+                self.message = format!("preview failed: {e}");
+                Action::None
+            }
         }
     }
 
@@ -593,11 +539,22 @@ mod tests {
     }
 
     #[test]
-    fn playback_without_a_pane_or_player_reports_cleanly() {
+    fn space_requests_playback_from_the_playhead() {
         let mut a = app();
-        a.on_key(KeyCode::Char(' '));
-        assert_eq!(a.message, "no room for the preview pane");
-        a.on_key(KeyCode::Char('x'));
-        assert_eq!(a.message, "nothing playing");
+        a.playhead = t(1.0);
+        match a.on_key(KeyCode::Char(' ')) {
+            Action::Play(target, start) => {
+                assert!(target.ends_with("cache/preview.edl"));
+                assert_eq!(start, 1.0);
+                let edl = std::fs::read_to_string(target).unwrap();
+                assert!(edl.starts_with("# mpv EDL v0"), "wrote a real EDL: {edl}");
+            }
+            other => panic!("expected Play, got {other:?}"),
+        }
+        // Empty timeline refuses politely.
+        let mut a = app();
+        a.project.main_mut().clips.clear();
+        assert_eq!(a.on_key(KeyCode::Char(' ')), Action::None);
+        assert_eq!(a.message, "timeline is empty");
     }
 }

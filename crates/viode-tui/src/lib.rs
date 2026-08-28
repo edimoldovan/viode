@@ -24,13 +24,29 @@ use graphics::Placement;
 
 pub fn run(project_file: &Path) -> Result<()> {
     let mut app = App::open(project_file)?;
-    let mut terminal = ratatui::init();
-    let result = event_loop(&mut terminal, &mut app);
-    ratatui::restore();
-    result
+    loop {
+        let mut terminal = ratatui::init();
+        let result = event_loop(&mut terminal, &mut app);
+        ratatui::restore();
+        match result? {
+            Exit::Quit => return Ok(()),
+            Exit::Play(target, start) => {
+                // The terminal belongs to mpv now: real shuttle controls
+                // (space pause, arrows seek), q comes back here.
+                if let Err(e) = preview::play_blocking(&target, start) {
+                    app.message = format!("mpv failed (is mpv installed?): {e}");
+                }
+            }
+        }
+    }
 }
 
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
+enum Exit {
+    Quit,
+    Play(std::path::PathBuf, f64),
+}
+
+fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<Exit> {
     let mut shown: Vec<Placement> = Vec::new();
     loop {
         app.reap();
@@ -39,13 +55,6 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
         let mut placements = Vec::new();
         terminal.draw(|f| placements = ui::draw(f, app))?;
 
-        if app.take_image_refresh() {
-            // A player just released the pane — wipe its leftovers.
-            let mut out = std::io::stdout();
-            out.write_all(graphics::delete_all())?;
-            out.flush()?;
-            shown.clear();
-        }
         // Images are independent of the text buffer: re-emit only when the
         // set of placements actually changed (edit, resize, thumb ready).
         if app.graphics && placements != shown {
@@ -57,11 +66,11 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             continue;
         }
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => {
-                if app.on_key(key.code) == Action::Quit {
-                    return Ok(());
-                }
-            }
+            Event::Key(key) if key.kind == KeyEventKind::Press => match app.on_key(key.code) {
+                Action::Quit => return Ok(Exit::Quit),
+                Action::Play(target, start) => return Ok(Exit::Play(target, start)),
+                Action::None => {}
+            },
             Event::Resize(..) => shown.clear(), // force re-emit at new geometry
             _ => {}
         }
