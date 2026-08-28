@@ -200,6 +200,7 @@ viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preser
 viode play [--from T]                           LIVE composited preview, no render
 viode queue add/ls/run/clear                    render queue
 viode media ls/missing · viode relink <dir>     media management, reconnect moved files
+viode bench <file>                              measure sw vs VA-API on YOUR footage
 viode silences <i>                              list silent stretches
 viode cut-silences <i> [--pad 0.15]             cut dead air (keeps padding)
 viode scenes <i> / split-scenes <i>             scene changes / split at them
@@ -215,7 +216,10 @@ viode serve --mcp                               MCP server on stdio
 Times accept `12`, `12.5`, `01:30`, or `00:01:30.250` everywhere.
 
 `--smart` renders by lossless stream-copy in ~0 time (cuts snap to
-keyframes). `--preset` finishes the master for a destination with two-pass
+keyframes). Hardware encoding is opt-in and honest: run `viode bench` on
+your own footage — if VA-API wins on your machine, `export
+VIODE_HWACCEL=vaapi` switches proxies and renders over; the default
+never changes without a local measurement. `--preset` finishes the master for a destination with two-pass
 EBU R128 loudness: `youtube` (-14 LUFS), `shorts` (1080x1920 center-crop,
 -14 LUFS), `podcast` (audio-only m4a, -16 LUFS).
 
