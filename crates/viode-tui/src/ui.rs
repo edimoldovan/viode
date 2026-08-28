@@ -46,7 +46,10 @@ pub fn draw(f: &mut Frame, app: &mut App) -> Vec<Placement> {
         Constraint::Length(1),
     ])
     .areas(f.area());
-    let _ = preview; // reserved: future scopes/meters pane
+    app.preview_area = Some(preview);
+    if app.is_playing() {
+        f.render_widget(block("preview  ·  space pause · x stop"), preview);
+    }
 
     draw_header(f, &*app, header);
     let placements = draw_timeline(f, app, timeline);

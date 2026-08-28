@@ -16,7 +16,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ratatui::crossterm::cursor::MoveTo;
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::crossterm::QueueableCommand;
 
 use app::{Action, App};
@@ -24,33 +24,43 @@ use graphics::Placement;
 
 pub fn run(project_file: &Path) -> Result<()> {
     let mut app = App::open(project_file)?;
-    loop {
-        let mut terminal = ratatui::init();
-        let result = event_loop(&mut terminal, &mut app);
-        ratatui::restore();
-        match result? {
-            Exit::Quit => return Ok(()),
-            Exit::Play(target, start) => {
-                // The terminal belongs to mpv now: real shuttle controls
-                // (space pause, arrows seek), q comes back here.
-                if let Err(e) = preview::play_blocking(&target, start) {
-                    app.message = format!("mpv failed (is mpv installed?): {e}");
-                }
-            }
-        }
-    }
+    let mut terminal = ratatui::init();
+    let result = event_loop(&mut terminal, &mut app);
+    ratatui::restore();
+    result
 }
 
-enum Exit {
-    Quit,
-    Play(std::path::PathBuf, f64),
-}
-
-fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<Exit> {
+fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut shown: Vec<Placement> = Vec::new();
     loop {
         app.reap();
         app.media.pump();
+
+        // While mpv paints the pane, WE go quiet: no redraws, no image
+        // emission — two writers on one terminal is the flicker machine.
+        if app.is_playing() {
+            if !event::poll(Duration::from_millis(100))? {
+                continue;
+            }
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char(' ') => app.toggle_pause(),
+                        KeyCode::Char('x') | KeyCode::Char('q') => app.stop_preview(),
+                        _ => {}
+                    }
+                }
+            }
+            continue;
+        }
+        if app.take_image_refresh() {
+            // The player is gone: wipe its frames and repaint everything.
+            let mut out = std::io::stdout();
+            out.write_all(graphics::delete_all())?;
+            out.flush()?;
+            shown.clear();
+            terminal.clear()?;
+        }
 
         let mut placements = Vec::new();
         terminal.draw(|f| placements = ui::draw(f, app))?;
@@ -66,11 +76,11 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             continue;
         }
         match event::read()? {
-            Event::Key(key) if key.kind == KeyEventKind::Press => match app.on_key(key.code) {
-                Action::Quit => return Ok(Exit::Quit),
-                Action::Play(target, start) => return Ok(Exit::Play(target, start)),
-                Action::None => {}
-            },
+            Event::Key(key) if key.kind == KeyEventKind::Press => {
+                if app.on_key(key.code) == Action::Quit {
+                    return Ok(());
+                }
+            }
             Event::Resize(..) => shown.clear(), // force re-emit at new geometry
             _ => {}
         }

@@ -35,16 +35,62 @@ pub fn edl_for(project: &Project, project_dir: &Path) -> String {
     edl
 }
 
-/// Play `target` (an .edl or a rendered file) full-terminal, blocking
-/// until the user quits mpv. The caller must have restored the terminal.
-pub fn play_blocking(target: &Path, start_secs: f64) -> std::io::Result<()> {
-    Command::new("mpv")
-        .arg("--vo=kitty")
-        .arg(format!("--start={start_secs}"))
-        .arg("--really-quiet")
-        .arg(target)
-        .status()
-        .map(|_| ())
+/// A player positioned INSIDE the TUI: mpv --vo=kitty pinned to a cell
+/// rectangle, driven over its IPC socket. The TUI freezes its own drawing
+/// while this is alive so the two never interleave terminal writes.
+pub struct Preview {
+    child: std::process::Child,
+    sock: std::path::PathBuf,
+}
+
+impl Preview {
+    pub fn spawn(
+        target: &Path,
+        area: ratatui::layout::Rect,
+        start_secs: f64,
+        sock: std::path::PathBuf,
+    ) -> std::io::Result<Preview> {
+        let _ = std::fs::remove_file(&sock);
+        let child = Command::new("mpv")
+            .arg("--vo=kitty")
+            // kitty vo geometry is 1-based terminal cells.
+            .arg(format!("--vo-kitty-left={}", area.x + 1))
+            .arg(format!("--vo-kitty-top={}", area.y + 1))
+            .arg(format!("--vo-kitty-cols={}", area.width))
+            .arg(format!("--vo-kitty-rows={}", area.height))
+            .arg(format!("--start={start_secs}"))
+            .arg(format!("--input-ipc-server={}", sock.display()))
+            .arg("--really-quiet")
+            .arg("--no-input-terminal") // our event loop owns the keyboard
+            .arg(target)
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()?;
+        Ok(Preview { child, sock })
+    }
+
+    pub fn toggle_pause(&self) {
+        if let Ok(mut s) = std::os::unix::net::UnixStream::connect(&self.sock) {
+            use std::io::Write;
+            let _ = writeln!(s, "{{\"command\":[\"cycle\",\"pause\"]}}");
+        }
+    }
+
+    pub fn finished(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    pub fn stop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.sock);
+    }
+}
+
+impl Drop for Preview {
+    fn drop(&mut self) {
+        self.stop();
+    }
 }
 
 #[cfg(test)]
