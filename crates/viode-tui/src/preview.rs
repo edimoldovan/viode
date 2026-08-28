@@ -16,6 +16,13 @@ pub fn edl_for(project: &Project, project_dir: &Path) -> String {
     for clip in &project.main().clips {
         let path = viode_core::proxy_for(project_dir, &clip.src)
             .unwrap_or_else(|| project_dir.join(&clip.src));
+        // mpv resolves relative EDL entries against the EDL file's own
+        // directory — paths must be absolute or nothing plays.
+        let path = path.canonicalize().unwrap_or_else(|_| {
+            std::env::current_dir()
+                .map(|d| d.join(&path))
+                .unwrap_or(path)
+        });
         let p = path.display().to_string();
         edl.push_str(&format!(
             "%{}%{},{},{}\n",
