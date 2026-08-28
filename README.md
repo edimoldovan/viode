@@ -72,7 +72,7 @@ demo" is not done. See [PLAN.md](PLAN.md) for the full vision.
 ## Proven on real media
 
 Not demo clips — real films, measured end-to-end on 2026-08-28.
-Test bench: AMD Ryzen 9 9950X3D (16c/32t), 60 GB RAM, Radeon iGPU,
+Test bench: AMD Ryzen 9 9950X3D (16c/32t), 64 GB RAM, Radeon iGPU,
 WD_BLACK SN8100 NVMe, Arch Linux (kernel 7.1.8). Media: His Girl Friday
 (1940, 1h32m of the fastest dialogue ever filmed), Sita Sings the Blues
 (CC, 1h22m), and an hour of genuine 4K60 (Big Buck Bunny, lossless-looped).
