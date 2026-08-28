@@ -32,21 +32,19 @@ pub fn run(project_file: &Path) -> Result<()> {
 
 fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<()> {
     let mut shown: Vec<Placement> = Vec::new();
-    let mut drew_playing_frame = false;
     loop {
         app.reap();
         app.media.pump();
 
-        // While mpv paints the pane, WE go quiet: no redraws, no image
-        // emission — two writers on one terminal is the flicker machine.
-        // One frame right at the start shows the pane border + status.
+        // While mpv paints the pane we keep drawing TEXT (mpv clears the
+        // screen on startup; our redraws bring the UI back and video sits
+        // in the image layer above text). What we must NOT do is emit our
+        // own kitty images — that would delete mpv's frames.
         if app.is_playing() {
-            if !drew_playing_frame {
-                terminal.draw(|f| {
-                    ui::draw(f, app);
-                })?;
-                drew_playing_frame = true;
-            }
+            terminal.draw(|f| {
+                ui::draw(f, app);
+            })?;
+            shown.clear(); // our images are gone; re-emit after playback
             if !event::poll(Duration::from_millis(100))? {
                 continue;
             }
@@ -61,7 +59,6 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
             }
             continue;
         }
-        drew_playing_frame = false;
         if app.take_image_refresh() {
             // The player is gone: wipe its frames and repaint everything.
             let mut out = std::io::stdout();
