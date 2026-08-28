@@ -45,6 +45,9 @@ fn save_load_roundtrip_is_lossless() {
         at: t(0.5),
         dur: t(2.0),
         font: Some("Sans Bold 64".into()),
+        xpos: Some(0.1),
+        ypos: Some(0.8),
+        color: Some("#FFCC00".into()),
     });
 
     project.save(&path).unwrap();

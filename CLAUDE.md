@@ -92,9 +92,31 @@ change. Colors stay named-ANSI so the TUI inherits the Omarchy theme.
   keyframed fade-out renders (last audio window 15+ dB below first).
   Waveform lanes + `viode levels` are the metering story.
 
-Phases 0–6 complete. Next: **Phase 7 — the pro-work gap** (transforms/
-PiP, color + scopes, ripple/roll/slip/slide, speed ramps, transition/
-title depth, export breadth, media relinking). See PLAN.md.
+**Phase 7 (pro-work gap) — done.**
+
+- Transforms: per-clip pos/scale/rotate/opacity (framepositioner child
+  props + rotate effect); `viode place`, MCP `place_set`. PiP works.
+- Color: `ColorGrade` -> videobalance, `.cube` LUTs via lut3d, scopes
+  (ffmpeg waveform/vectorscope) as `viode scope` + MCP `scope` image.
+- Trim grammar: `ops::roll/slip/slide` (rate-aware, total-preserving,
+  refuse impossible trims); CLI + MCP verbs.
+- Speed: `Clip.rate` — `len()` = src_len/rate everywhere, GES videorate+
+  pitch time effects; verified 2x renders half duration. `--smooth fps`
+  = ffmpeg minterpolate optical flow.
+- Transitions: `transition_kind` retypes GES auto-transitions (wipes).
+  Titles: xpos/ypos/color styling.
+- Exports: `Codec` h264/hevc/av1/prores/dnxhr + bitrate (core::export::
+  transcode); shared render queue (core::queue, cache/queue.toml).
+- Media: core::media missing/relink (by filename, recursive).
+- LIVE composited preview (from Phase 6): `build_timeline` shared with
+  render; `preview_play` GES pipeline in a window; `viode play`, TUI
+  `v`, MCP `play` (detached). VIODE_PREVIEW_SINK=fake for tests.
+
+**RULE: interface parity.** CLI, TUI, and MCP ship every capability
+together — the model edits exactly as a human does.
+
+All planned phases (0–7) complete. Next: dogfooding on real footage
+drives the backlog; packaging deferred by Ed's call.
 
 ## Stack decisions (settled — don't relitigate casually)
 

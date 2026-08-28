@@ -125,6 +125,31 @@ pub struct Clip {
     /// interpolation): "volume" (0..2+) or "alpha" (0..1, video opacity).
     #[serde(default, rename = "key", skip_serializing_if = "Vec::is_empty")]
     pub keys: Vec<Keyframe>,
+    /// Playback rate: 2.0 = double speed, 0.5 = slow motion. None = 1.0.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate: Option<f64>,
+    /// Top-left position as fractions of the frame (0,0 = top-left).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pos: Option<[f64; 2]>,
+    /// Uniform scale of the video (1.0 = full frame). 0.25 = corner PiP.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scale: Option<f64>,
+    /// Rotation in degrees (clockwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotate: Option<f64>,
+    /// Static opacity 0..1 (for animated opacity use an "alpha" keyframe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<f64>,
+    /// Color grade (all fields neutral by default).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorGrade>,
+    /// 3D LUT file (.cube) applied to the clip.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lut: Option<PathBuf>,
+    /// Transition type with the previous clip: "crossfade" (default) or a
+    /// GES transition nick like "bar-wipe-lr", "box-wipe-tl".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transition_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
 }
@@ -134,6 +159,19 @@ pub struct Keyframe {
     pub prop: String,
     pub at: Time,
     pub value: f64,
+}
+
+/// videobalance-style grade; every field defaults to neutral.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ColorGrade {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub brightness: Option<f64>, // -1..1, neutral 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contrast: Option<f64>, // 0..2, neutral 1
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub saturation: Option<f64>, // 0..2, neutral 1
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hue: Option<f64>, // -1..1, neutral 0
 }
 
 impl Clip {
@@ -148,12 +186,37 @@ impl Clip {
             volume: None,
             pan: None,
             keys: Vec::new(),
+            rate: None,
+            pos: None,
+            scale: None,
+            rotate: None,
+            opacity: None,
+            color: None,
+            lut: None,
+            transition_kind: None,
             label: None,
         }
     }
 
-    pub fn len(&self) -> Time {
+    /// Length of the SOURCE range consumed.
+    pub fn src_len(&self) -> Time {
         self.out - self.in_
+    }
+
+    /// Length on the TIMELINE: source range divided by playback rate.
+    pub fn len(&self) -> Time {
+        match self.rate {
+            Some(r) if r > 0.0 => Time((self.src_len().0 as f64 / r).round() as u64),
+            _ => self.src_len(),
+        }
+    }
+
+    /// Convert a timeline offset within this clip to a source offset.
+    pub fn src_offset(&self, timeline_offset: Time) -> Time {
+        match self.rate {
+            Some(r) if r > 0.0 => Time((timeline_offset.0 as f64 * r).round() as u64),
+            _ => timeline_offset,
+        }
     }
 
     /// Timeline span for an overlay clip.
@@ -171,6 +234,15 @@ pub struct Title {
     /// Pango font description, e.g. "Sans Bold 64".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font: Option<String>,
+    /// Horizontal position 0..1 (0 = left). Default centered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub xpos: Option<f64>,
+    /// Vertical position 0..1 (0 = top). 0.8 = lower third.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ypos: Option<f64>,
+    /// Text color as "#RRGGBB" or "#AARRGGBB". Default white.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, thiserror::Error)]

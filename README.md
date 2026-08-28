@@ -20,7 +20,8 @@ Viode is that editor, built Linux-first around three ideas:
   without knowing what LUFS means.
 - **AI is a first-class editor, not a plugin.** Claude (or any
   [MCP](https://modelcontextprotocol.io) client) drives the same engine you
-  do — it can cut, trim, *look at frames*, read waveforms, and render.
+  do — full feature parity with the CLI: it can cut, trim, place, grade,
+  *look at frames and scopes*, read waveforms, and render.
 
 Today Viode ships a CLI, an MCP server, and a fast keyboard UI with real
 filmstrips and inline playback. They are all thin clients over one engine
@@ -40,11 +41,12 @@ not a rewrite.
 | Loudness-correct exports | know the right LUFS, configure it | `viode render --preset podcast` — two-pass EBU R128 built in |
 | Price | rent, forever | MIT, forever |
 
-What's left before there's no reason to open Premiere at all: color,
-transforms, deep trim tools ([PLAN.md](PLAN.md), Phase 7). Playback, audio
-mixing, and keyframes shipped in Phase 6 — press space in the TUI and the
-timeline plays *inside the terminal*, instantly, with zero rendering. The
-table above is the part they can't copy back.
+Every planned phase has shipped: playback (instant in-terminal AND live
+composited), audio mixing, keyframes, transforms/PiP, color with scopes,
+the full roll/slip/slide trim grammar, speed ramps with optical-flow
+smoothing, ProRes/DNxHR/HEVC/AV1 exports with a render queue, and media
+relinking. What remains is depth and dogfooding — and the table above is
+the part they can't copy back.
 
 ![Viode editing a timeline: filmstrips, waveforms, playhead, and live playback](docs/screenshot.png)
 
@@ -124,7 +126,8 @@ and therefore aether/Omarchy — is running.
 | `u` `U` | undo / redo |
 | `space` | play the timeline INLINE from the playhead (instant, cuts-only) / pause |
 | `x` | stop playback |
-| `P` | composited preview (tracks, fades, titles, keyframes), played inline |
+| `v` | LIVE composited preview in a window — no render step |
+| `P` | render the composite, then play it inline |
 | `r` | render the master |
 | `w` / `q` / `?` | save / quit (confirms if unsaved) / help |
 
@@ -156,13 +159,22 @@ viode angle <file>                              add a synced multicam angle (dis
 viode take <track> <start> <end>                cut to an angle for a timeline range
 viode transcribe <i> [--model M]                whisper.cpp transcript (timed segments)
 viode cut-text <i> <from> <to>                  cut transcript segments out of the video
+viode place <i> --x --y --scale --opacity       picture-in-picture, layouts, rotation
+viode color <i> --saturation ... [--lut f.cube] color grade / LUT
+viode scope <i> [--kind waveform|vector]        colorist's instruments (PNG)
+viode speed <i> <rate>                          2 = fast, 0.5 = slow motion
+viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preserved)
+viode play [--from T]                           LIVE composited preview, no render
+viode queue add/ls/run/clear                    render queue
+viode media ls/missing · viode relink <dir>     media management, reconnect moved files
 viode silences <i>                              list silent stretches
 viode cut-silences <i> [--pad 0.15]             cut dead air (keeps padding)
 viode scenes <i> / split-scenes <i>             scene changes / split at them
 viode levels <i> [--window 0.5]                 RMS loudness map
 viode waveform <i> / thumbs <i>                 waveform PNG / contact sheet PNG
 viode proxy [--force]                           build 540p proxies for all media
-viode render [-o out] [--smart] [--preset P]    render (P: youtube|shorts|podcast)
+viode render [--preset P] [--codec C]           presets or h264/hevc/av1/prores/dnxhr
+             [--bitrate kbps] [--smooth fps]    bitrate targeting, optical-flow slow-mo
 viode tui                                       terminal UI
 viode serve --mcp                               MCP server on stdio
 ```
@@ -288,7 +300,7 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 4 | The TUI | ✅ |
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
 | 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
-| 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth | ⏳ |
+| 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth, live preview | ✅ |
 
 ## Development
 

@@ -120,7 +120,10 @@ fn handshake_and_tool_listing() {
         "clip_add", "clip_trim", "clip_split", "clip_move", "clip_remove",
         "frame_grab", "render_preview", "render", "track_add", "track_toggle",
         "fade_set", "fx_add", "fx_clear", "title_add", "title_remove",
-        "angle_add", "take", "transcribe", "text_cut",
+        "angle_add", "take", "transcribe", "text_cut", "place_set",
+        "color_set", "scope", "speed_set", "roll", "slip", "slide", "play",
+        "media_missing", "relink", "queue_add", "queue_list", "queue_run",
+        "queue_clear", "gain_set", "pan_set", "key_add", "key_remove",
     ] {
         assert!(names.contains(&expected), "missing tool {expected}, have {names:?}");
     }

@@ -208,6 +208,7 @@ impl App {
             KeyCode::Char('U') => self.redo(),
             KeyCode::Char(' ') => self.play(),
             KeyCode::Char('P') => self.preview_timeline(),
+            KeyCode::Char('v') => self.play_live(),
             KeyCode::Char('r') => self.render(),
             _ => {}
         }
@@ -424,6 +425,37 @@ impl App {
         }
         let (pos, paused) = state.unwrap_or((0.0, false));
         self.spawn_preview_state(&target, pos, paused);
+    }
+
+    /// v: LIVE composited preview — the GES pipeline plays the timeline
+    /// in a window (no render step). Runs as a child process so the TUI
+    /// stays interactive.
+    fn play_live(&mut self) {
+        if self.project.main().clips.is_empty() {
+            self.message = "timeline is empty".into();
+            return;
+        }
+        let Ok(exe) = std::env::current_exe() else {
+            self.message = "cannot find the viode binary".into();
+            return;
+        };
+        match Command::new(exe)
+            .arg("--project")
+            .arg(&self.project_file)
+            .arg("play")
+            .arg("--from")
+            .arg(self.playhead.to_string())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(child) => {
+                self.children.push(child);
+                self.message = "live composite window opened (close it to end)".into();
+            }
+            Err(e) => self.message = format!("live preview failed: {e}"),
+        }
     }
 
     /// P: the accurate path — GES renders the full composite (tracks,

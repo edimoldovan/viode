@@ -370,7 +370,7 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     let widget = if app.message.is_empty() {
         Paragraph::new(
-            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  P composited  r render  ? help  q quit",
+            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  v live  P composited  r render  ? help  q quit",
         )
         .style(Style::default().fg(Color::DarkGray))
     } else {
@@ -385,9 +385,9 @@ fn draw_help(f: &mut Frame) {
   playhead   h/l ±0.1s   H/L ±1s   j/k clip edges
   edit       s split   d delete   i trim start   o trim end
              </> move clip   u undo   U redo
-  view       space plays the timeline full-terminal from the
-             playhead (instant, cuts-only; q returns here).
-             P renders the composite first (tracks/fades/keys).
+  view       space: play cuts in the pane (instant; space pause,
+             x stop). v: LIVE composite in a window, no render.
+             P: render the composite, then play it in the pane.
   project    w save   r render   q quit
 
   The playhead selects: verbs act on the main-track clip
@@ -458,6 +458,9 @@ mod tests {
             at: t(0.2),
             dur: t(1.0),
             font: None,
+            xpos: None,
+            ypos: None,
+            color: None,
         });
         project.save(&file).unwrap();
         let mut app = App::open(&file).unwrap();

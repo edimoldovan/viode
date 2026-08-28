@@ -69,8 +69,108 @@ enum Cmd {
     Move { from: usize, to: usize },
     /// Remove a main-track clip
     Rm { index: usize },
-    /// Crossfade a main-track clip with the previous one (0 clears)
-    Fade { index: usize, duration: String },
+    /// Crossfade/wipe with the previous clip (0 clears)
+    Fade {
+        index: usize,
+        duration: String,
+        /// crossfade (default), bar-wipe-lr, bar-wipe-tb, box-wipe-tl, clock-cw
+        #[arg(long)]
+        kind: Option<String>,
+    },
+    /// Position/scale/rotate/opacity — picture-in-picture and layouts
+    Place {
+        index: usize,
+        /// Fraction of frame width for the left edge (0..1)
+        #[arg(long, allow_negative_numbers = true)]
+        x: Option<f64>,
+        /// Fraction of frame height for the top edge (0..1)
+        #[arg(long, allow_negative_numbers = true)]
+        y: Option<f64>,
+        /// Uniform scale (0.25 = corner PiP)
+        #[arg(long)]
+        scale: Option<f64>,
+        /// Rotation in degrees
+        #[arg(long, allow_negative_numbers = true)]
+        rotate: Option<f64>,
+        /// Opacity 0..1
+        #[arg(long)]
+        opacity: Option<f64>,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+        /// Reset all placement to full-frame defaults
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Color grade a clip (neutral: brightness 0, contrast/saturation 1, hue 0)
+    Color {
+        index: usize,
+        #[arg(long, allow_negative_numbers = true)]
+        brightness: Option<f64>,
+        #[arg(long)]
+        contrast: Option<f64>,
+        #[arg(long)]
+        saturation: Option<f64>,
+        #[arg(long, allow_negative_numbers = true)]
+        hue: Option<f64>,
+        /// 3D LUT (.cube) to apply
+        #[arg(long)]
+        lut: Option<PathBuf>,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Waveform/vectorscope of a frame — the colorist's instruments
+    Scope {
+        index: usize,
+        /// Source time of the frame to analyze
+        #[arg(long, default_value = "0")]
+        at: String,
+        #[arg(long, default_value = "waveform")]
+        kind: String,
+    },
+    /// Playback rate: 2 = double speed, 0.5 = slow motion (1 clears)
+    Speed {
+        index: usize,
+        rate: f64,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Roll the boundary between clip i-1 and i by ±seconds (total unchanged)
+    Roll {
+        index: usize,
+        #[arg(allow_negative_numbers = true)]
+        delta: f64,
+    },
+    /// Slip a clip's content by ±seconds (slot unchanged)
+    Slip {
+        index: usize,
+        #[arg(allow_negative_numbers = true)]
+        delta: f64,
+    },
+    /// Slide a clip against its neighbours by ±seconds (total unchanged)
+    Slide {
+        index: usize,
+        #[arg(allow_negative_numbers = true)]
+        delta: f64,
+    },
+    /// LIVE composited preview: play the timeline in a window, no render
+    Play {
+        #[arg(long, default_value = "0")]
+        from: String,
+    },
+    /// Render queue: add jobs, run them in order
+    Queue {
+        #[command(subcommand)]
+        cmd: QueueCmd,
+    },
+    /// List media / find missing sources
+    Media {
+        #[command(subcommand)]
+        cmd: MediaCmd,
+    },
+    /// Relink missing media by filename from a directory (recursive)
+    Relink { dir: PathBuf },
     /// Set a clip's audio gain (linear, 1.0 = unity; e.g. 0.5 = -6dB)
     Gain {
         index: usize,
@@ -124,6 +224,15 @@ enum Cmd {
         /// Pango font description, e.g. "Sans Bold 64"
         #[arg(long)]
         font: Option<String>,
+        /// Horizontal position 0..1
+        #[arg(long)]
+        x: Option<f64>,
+        /// Vertical position 0..1 (0.8 = lower third)
+        #[arg(long)]
+        y: Option<f64>,
+        /// Text color "#RRGGBB"
+        #[arg(long)]
+        color: Option<String>,
     },
     /// List / remove titles
     Titles {
@@ -235,7 +344,43 @@ enum Cmd {
         /// Finish for a destination: youtube, shorts, or podcast
         #[arg(long)]
         preset: Option<String>,
+        /// Delivery codec: h264, hevc, av1, prores, dnxhr
+        #[arg(long)]
+        codec: Option<String>,
+        /// Video bitrate in kbps (default: quality-targeted CRF)
+        #[arg(long)]
+        bitrate: Option<u32>,
+        /// Optical-flow smooth slow motion to this fps (ffmpeg minterpolate)
+        #[arg(long)]
+        smooth: Option<u32>,
     },
+}
+
+#[derive(Subcommand)]
+enum QueueCmd {
+    /// Queue a render job (same options as `render`)
+    Add {
+        #[arg(long)]
+        preset: Option<String>,
+        #[arg(long)]
+        codec: Option<String>,
+        #[arg(long)]
+        bitrate: Option<u32>,
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    Ls,
+    /// Run every queued job in order
+    Run,
+    Clear,
+}
+
+#[derive(Subcommand)]
+enum MediaCmd {
+    /// Every source referenced by the timeline
+    Ls,
+    /// Sources that no longer exist on disk
+    Missing,
 }
 
 #[derive(Subcommand)]
@@ -286,14 +431,121 @@ fn run() -> Result<()> {
             println!("removed [{}] {}", index, clip.src.display());
             Ok(())
         }),
-        Cmd::Fade { index, duration } => with_project(&cli.project, |p| {
+        Cmd::Fade { index, duration, kind } => with_project(&cli.project, |p| {
             let d = Time::parse(&duration)?;
             let d = (d != Time::ZERO).then_some(d);
             ops::set_transition(p.main_mut(), index, d)?;
+            p.main_mut().clips[index].transition_kind = kind.filter(|_| d.is_some());
             println!(
-                "clip {index} crossfade: {}",
+                "clip {index} transition: {}",
                 d.map(|d| d.to_string()).unwrap_or_else(|| "none".into())
             );
+            Ok(())
+        }),
+        Cmd::Place { index, x, y, scale, rotate, opacity, track, clear } => {
+            with_project(&cli.project, |p| {
+                let t = ops::track_mut(p, track)?;
+                let c = t.clips.get_mut(index).context("clip index out of range")?;
+                if clear {
+                    (c.pos, c.scale, c.rotate, c.opacity) = (None, None, None, None);
+                    println!("clip {index}: full-frame");
+                    return Ok(());
+                }
+                if x.is_some() || y.is_some() {
+                    let old = c.pos.unwrap_or([0.0, 0.0]);
+                    c.pos = Some([x.unwrap_or(old[0]), y.unwrap_or(old[1])]);
+                }
+                if scale.is_some() {
+                    c.scale = scale;
+                }
+                if rotate.is_some() {
+                    c.rotate = rotate;
+                }
+                if let Some(o) = opacity {
+                    if !(0.0..=1.0).contains(&o) {
+                        bail!("opacity {o} out of range (0..1)");
+                    }
+                    c.opacity = Some(o);
+                }
+                println!("clip {index} placed");
+                Ok(())
+            })
+        }
+        Cmd::Color { index, brightness, contrast, saturation, hue, lut, track, clear } => {
+            with_project(&cli.project, |p| {
+                let t = ops::track_mut(p, track)?;
+                let c = t.clips.get_mut(index).context("clip index out of range")?;
+                if clear {
+                    c.color = None;
+                    c.lut = None;
+                    println!("clip {index}: neutral color");
+                    return Ok(());
+                }
+                if brightness.is_some() || contrast.is_some() || saturation.is_some() || hue.is_some() {
+                    let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
+                        brightness: None, contrast: None, saturation: None, hue: None,
+                    });
+                    if brightness.is_some() { g.brightness = brightness; }
+                    if contrast.is_some() { g.contrast = contrast; }
+                    if saturation.is_some() { g.saturation = saturation; }
+                    if hue.is_some() { g.hue = hue; }
+                    c.color = Some(g);
+                }
+                if lut.is_some() {
+                    c.lut = lut;
+                }
+                println!("clip {index} graded");
+                Ok(())
+            })
+        }
+        Cmd::Scope { index, at, kind } => {
+            let project = Project::load(&cli.project)?;
+            let src = clip_source(&cli.project, &project, index)?;
+            let dir = project_dir(&cli.project);
+            let dest = dir.join("cache").join(format!("scope_{index}.png"));
+            scope_png(&src, &Time::parse(&at)?, &kind, &dest)?;
+            println!("{}", dest.display());
+            Ok(())
+        }
+        Cmd::Speed { index, rate, track } => with_project(&cli.project, |p| {
+            if rate <= 0.0 || rate > 20.0 {
+                bail!("rate {rate} out of range (0..20]");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.rate = (rate != 1.0).then_some(rate);
+            println!("clip {index} rate {rate} (timeline length {})", c.len());
+            Ok(())
+        }),
+        Cmd::Roll { index, delta } => with_project(&cli.project, |p| {
+            ops::roll(p.main_mut(), index, (delta * 1e9) as i64)?;
+            println!("rolled boundary {index} by {delta}s (total {})", p.total_duration());
+            Ok(())
+        }),
+        Cmd::Slip { index, delta } => with_project(&cli.project, |p| {
+            ops::slip(p.main_mut(), index, (delta * 1e9) as i64)?;
+            println!("slipped clip {index} by {delta}s");
+            Ok(())
+        }),
+        Cmd::Slide { index, delta } => with_project(&cli.project, |p| {
+            ops::slide(p.main_mut(), index, (delta * 1e9) as i64)?;
+            println!("slid clip {index} by {delta}s (total {})", p.total_duration());
+            Ok(())
+        }),
+        Cmd::Play { from } => {
+            let project = Project::load(&cli.project)?;
+            let dir = project_dir(&cli.project);
+            println!("live preview — close the window or wait for the end");
+            viode_core::preview_play(&project, &dir, Time::parse(&from)?)?;
+            Ok(())
+        }
+        Cmd::Queue { cmd } => cmd_queue(&cli.project, cmd),
+        Cmd::Media { cmd } => cmd_media(&cli.project, cmd),
+        Cmd::Relink { dir } => with_project(&cli.project, |p| {
+            let pdir = project_dir(&cli.project);
+            let n = viode_core::media::relink(p, &pdir, &dir);
+            let still = viode_core::media::missing(p, &pdir).len();
+            println!("relinked {n} clip(s); {still} still missing");
             Ok(())
         }),
         Cmd::Gain { index, volume, track } => with_project(&cli.project, |p| {
@@ -365,12 +617,15 @@ fn run() -> Result<()> {
             }
             Ok(())
         }),
-        Cmd::Title { text, at, dur, font } => with_project(&cli.project, |p| {
+        Cmd::Title { text, at, dur, font, x, y, color } => with_project(&cli.project, |p| {
             p.titles.push(Title {
                 text: text.clone(),
                 at: Time::parse(&at)?,
                 dur: Time::parse(&dur)?,
                 font,
+                xpos: x,
+                ypos: y,
+                color,
             });
             println!("title {:?} at {at} for {dur}", text);
             Ok(())
@@ -448,9 +703,15 @@ fn run() -> Result<()> {
             let initial = cli.project.exists().then(|| cli.project.clone());
             viode_mcp::serve(initial)
         }
-        Cmd::Render { output, smart, preset } => {
-            cmd_render(&cli.project, output, smart, preset.as_deref())
-        }
+        Cmd::Render { output, smart, preset, codec, bitrate, smooth } => cmd_render(
+            &cli.project,
+            output,
+            smart,
+            preset.as_deref(),
+            codec.as_deref(),
+            bitrate,
+            smooth,
+        ),
     }
 }
 
@@ -870,11 +1131,139 @@ fn cmd_ls(project_file: &Path) -> Result<()> {
     Ok(())
 }
 
+/// ffmpeg waveform/vectorscope of one frame — the colorist's instruments.
+fn scope_png(src: &Path, at: &Time, kind: &str, dest: &Path) -> Result<()> {
+    let filter = match kind {
+        "waveform" => "waveform=graticule=green:intensity=0.1",
+        "vector" | "vectorscope" => "vectorscope=graticule=green",
+        other => bail!("unknown scope {other:?} (waveform, vector)"),
+    };
+    if let Some(d) = dest.parent() {
+        fs::create_dir_all(d)?;
+    }
+    let out = std::process::Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-ss", &at.as_secs_f64().to_string(), "-i"])
+        .arg(src)
+        .args(["-frames:v", "1", "-vf", filter])
+        .arg(dest)
+        .output()?;
+    if !out.status.success() {
+        bail!("ffmpeg scope failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    Ok(())
+}
+
+use viode_core::queue::{self as rqueue, QueueJob, RenderQueue};
+
+fn load_queue(project_file: &Path) -> Result<RenderQueue> {
+    Ok(rqueue::load(&project_dir(project_file))?)
+}
+
+fn save_queue(project_file: &Path, q: &RenderQueue) -> Result<()> {
+    Ok(rqueue::save(&project_dir(project_file), q)?)
+}
+
+fn cmd_queue(project_file: &Path, cmd: QueueCmd) -> Result<()> {
+    match cmd {
+        QueueCmd::Add { preset, codec, bitrate, output } => {
+            let mut q = load_queue(project_file)?;
+            q.jobs.push(QueueJob { preset, codec, bitrate, output });
+            save_queue(project_file, &q)?;
+            println!("queued job {} — run with `viode queue run`", q.jobs.len());
+            Ok(())
+        }
+        QueueCmd::Ls => {
+            let q = load_queue(project_file)?;
+            for (i, j) in q.jobs.iter().enumerate() {
+                println!(
+                    "[{i}] preset={} codec={} bitrate={} output={}",
+                    j.preset.as_deref().unwrap_or("-"),
+                    j.codec.as_deref().unwrap_or("-"),
+                    j.bitrate.map(|b| b.to_string()).unwrap_or_else(|| "-".into()),
+                    j.output.as_ref().map(|o| o.display().to_string()).unwrap_or_else(|| "-".into()),
+                );
+            }
+            if q.jobs.is_empty() {
+                println!("queue empty");
+            }
+            Ok(())
+        }
+        QueueCmd::Run => {
+            let q = load_queue(project_file)?;
+            if q.jobs.is_empty() {
+                bail!("queue empty");
+            }
+            let n = q.jobs.len();
+            for (i, j) in q.jobs.iter().enumerate() {
+                println!("== job {}/{n} ==", i + 1);
+                cmd_render(
+                    project_file,
+                    j.output.clone(),
+                    false,
+                    j.preset.as_deref(),
+                    j.codec.as_deref(),
+                    j.bitrate,
+                    None,
+                )?;
+            }
+            save_queue(project_file, &RenderQueue::default())?;
+            println!("queue complete ({n} render(s))");
+            Ok(())
+        }
+        QueueCmd::Clear => {
+            save_queue(project_file, &RenderQueue::default())?;
+            println!("queue cleared");
+            Ok(())
+        }
+    }
+}
+
+fn cmd_media(project_file: &Path, cmd: MediaCmd) -> Result<()> {
+    let project = Project::load(project_file)?;
+    let dir = project_dir(project_file);
+    match cmd {
+        MediaCmd::Ls => {
+            let mut seen = std::collections::BTreeSet::new();
+            for track in &project.tracks {
+                for clip in &track.clips {
+                    if seen.insert(clip.src.clone()) {
+                        let p = dir.join(&clip.src);
+                        let status = if p.exists() {
+                            viode_core::probe::probe_cached(&dir, &p)
+                                .map(|i| i.duration.to_string())
+                                .unwrap_or_else(|_| "unreadable".into())
+                        } else {
+                            "MISSING".into()
+                        };
+                        println!("{}  {status}", clip.src.display());
+                    }
+                }
+            }
+            Ok(())
+        }
+        MediaCmd::Missing => {
+            let lost = viode_core::media::missing(&project, &dir);
+            for (ti, ci, src) in &lost {
+                println!("track {ti} clip {ci}: {}", src.display());
+            }
+            if lost.is_empty() {
+                println!("all media present");
+            } else {
+                println!("{} missing — `viode relink <dir>` to reconnect", lost.len());
+            }
+            Ok(())
+        }
+    }
+}
+
 fn cmd_render(
     project_file: &Path,
     output: Option<PathBuf>,
     smart: bool,
     preset: Option<&str>,
+    codec: Option<&str>,
+    bitrate: Option<u32>,
+    smooth: Option<u32>,
 ) -> Result<()> {
     let project = Project::load(project_file)?;
     if project.main().clips.is_empty() && project.tracks.len() == 1 && project.titles.is_empty() {
@@ -887,18 +1276,29 @@ fn cmd_render(
                 .with_context(|| format!("unknown preset {p:?} (youtube, shorts, podcast)"))
         })
         .transpose()?;
-    if smart && preset.is_some() {
-        bail!("--smart and --preset don't combine: presets re-process the master render");
+    let codec = codec
+        .map(|c| {
+            viode_core::Codec::parse(c)
+                .with_context(|| format!("unknown codec {c:?} (h264, hevc, av1, prores, dnxhr)"))
+        })
+        .transpose()?;
+    if smart && (preset.is_some() || codec.is_some() || smooth.is_some()) {
+        bail!("--smart can't combine with preset/codec/smooth: they re-process the master");
+    }
+    if preset.is_some() && codec.is_some() {
+        bail!("--preset and --codec are alternatives — pick one");
     }
 
     let started = std::time::Instant::now();
     let name = &project.project.name;
 
-    let master = match preset {
-        Some(_) => dir.join("cache").join("master.mp4"),
-        None => output
+    let needs_post = preset.is_some() || codec.is_some() || smooth.is_some();
+    let master = if needs_post {
+        dir.join("cache").join("master.mp4")
+    } else {
+        output
             .clone()
-            .unwrap_or_else(|| dir.join("renders").join(format!("{name}.mp4"))),
+            .unwrap_or_else(|| dir.join("renders").join(format!("{name}.mp4")))
     };
 
     let backend: Box<dyn RenderBackend> = if smart {
@@ -919,6 +1319,18 @@ fn cmd_render(
                 .join(format!("{name}-{}.{}", preset_name(preset), preset.extension()))
         });
         viode_core::apply_preset(&master, &out, preset)?;
+        out
+    } else if let Some(codec) = codec {
+        let out = output.unwrap_or_else(|| {
+            dir.join("renders")
+                .join(format!("{name}-{codec:?}.{}", codec.extension()).to_lowercase())
+        });
+        viode_core::transcode(&master, &out, codec, bitrate)?;
+        out
+    } else if let Some(fps) = smooth {
+        let out = output
+            .unwrap_or_else(|| dir.join("renders").join(format!("{name}-smooth.mp4")));
+        viode_core::smooth(&master, &out, fps)?;
         out
     } else {
         master

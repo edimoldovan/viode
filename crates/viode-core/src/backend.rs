@@ -85,12 +85,22 @@ fn track_type(kind: crate::model::TrackKind) -> ges::TrackType {
     }
 }
 
+fn add_effect(ges_clip: &ges::Clip, desc: &str) -> Result<(), RenderError> {
+    let effect = ges::Effect::new(desc)
+        .map_err(|e| RenderError::Gst(format!("bad effect {desc:?}: {e}")))?;
+    ges_clip
+        .add(&effect)
+        .map_err(|e| RenderError::Gst(format!("could not add effect {desc:?}: {e}")))?;
+    Ok(())
+}
+
 fn add_media_clip(
     layer: &ges::Layer,
     project_dir: &Path,
     clip: &crate::model::Clip,
     start: gst::ClockTime,
     types: ges::TrackType,
+    project_res: [u32; 2],
 ) -> Result<(), RenderError> {
     let path = resolve(project_dir, &clip.src);
     let uri = gst::glib::filename_to_uri(&path, None)?;
@@ -102,6 +112,55 @@ fn add_media_clip(
         clip.len().to_clocktime(),
         types,
     )?;
+    // Speed: videorate/pitch are GES time effects — they change how much
+    // source the (already rate-scaled) timeline duration consumes.
+    if let Some(r) = clip.rate.filter(|r| *r > 0.0 && *r != 1.0) {
+        add_effect(&ges_clip, &format!("videorate rate={r}"))?;
+        add_effect(&ges_clip, &format!("pitch tempo={r}"))?;
+    }
+    // Transform: position/scale via the frame positioner, opacity via alpha.
+    if clip.pos.is_some() || clip.scale.is_some() {
+        let scale = clip.scale.unwrap_or(1.0).clamp(0.01, 4.0);
+        let [px, py] = clip.pos.unwrap_or([0.0, 0.0]);
+        let (w, h) = (
+            (project_res[0] as f64 * scale) as i32,
+            (project_res[1] as f64 * scale) as i32,
+        );
+        for (prop, v) in [
+            ("width", w),
+            ("height", h),
+            ("posx", (project_res[0] as f64 * px) as i32),
+            ("posy", (project_res[1] as f64 * py) as i32),
+        ] {
+            ges_clip
+                .set_child_property(prop, &v)
+                .map_err(|e| RenderError::Gst(format!("transform {prop}: {e}")))?;
+        }
+    }
+    if let Some(a) = clip.opacity {
+        ges_clip
+            .set_child_property("alpha", &a.clamp(0.0, 1.0))
+            .map_err(|e| RenderError::Gst(format!("opacity: {e}")))?;
+    }
+    if let Some(deg) = clip.rotate {
+        add_effect(&ges_clip, &format!("rotate angle={}", deg.to_radians()))?;
+    }
+    if let Some(grade) = &clip.color {
+        add_effect(
+            &ges_clip,
+            &format!(
+                "videobalance brightness={} contrast={} saturation={} hue={}",
+                grade.brightness.unwrap_or(0.0),
+                grade.contrast.unwrap_or(1.0),
+                grade.saturation.unwrap_or(1.0),
+                grade.hue.unwrap_or(0.0),
+            ),
+        )?;
+    }
+    if let Some(lut) = &clip.lut {
+        let lut_path = resolve(project_dir, lut);
+        add_effect(&ges_clip, &format!("lut3d location={}", lut_path.display()))?;
+    }
     for desc in &clip.effects {
         let effect = ges::Effect::new(desc)
             .map_err(|e| RenderError::Gst(format!("bad effect {desc:?}: {e}")))?;
@@ -150,15 +209,12 @@ fn add_media_clip(
     Ok(())
 }
 
-impl RenderBackend for GesBackend {
-    fn render(
-        &self,
-        project: &Project,
-        project_dir: &Path,
-        output: &Path,
-    ) -> Result<(), RenderError> {
-        ges::init()?;
+/// Build the full GES timeline for a project — shared by the renderer and
+/// the live preview.
+pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Timeline, RenderError> {
+    ges::init()?;
 
+    {
         let timeline = ges::Timeline::new_audio_video();
         timeline.set_auto_transition(true); // overlaps crossfade automatically
 
@@ -181,6 +237,20 @@ impl RenderBackend for GesBackend {
                     t.set_child_property("font-desc", font)
                         .map_err(|e| RenderError::Gst(format!("title font: {e}")))?;
                 }
+                if let Some(x) = title.xpos {
+                    t.set_child_property("xpos", &x)
+                        .map_err(|e| RenderError::Gst(format!("title xpos: {e}")))?;
+                }
+                if let Some(y) = title.ypos {
+                    t.set_child_property("ypos", &y)
+                        .map_err(|e| RenderError::Gst(format!("title ypos: {e}")))?;
+                }
+                if let Some(c) = &title.color {
+                    let argb = parse_color(c)
+                        .ok_or_else(|| RenderError::Gst(format!("bad color {c:?}")))?;
+                    t.set_child_property("color", &argb)
+                        .map_err(|e| RenderError::Gst(format!("title color: {e}")))?;
+                }
             }
         }
 
@@ -191,7 +261,14 @@ impl RenderBackend for GesBackend {
             let layer = timeline.append_layer();
             for clip in &track.clips {
                 let start = clip.at.unwrap_or(crate::Time::ZERO).to_clocktime();
-                add_media_clip(&layer, project_dir, clip, start, track_type(track.kind))?;
+                add_media_clip(
+                    &layer,
+                    project_dir,
+                    clip,
+                    start,
+                    track_type(track.kind),
+                    project.project.resolution,
+                )?;
             }
         }
 
@@ -205,9 +282,48 @@ impl RenderBackend for GesBackend {
                 clip,
                 start.to_clocktime(),
                 track_type(main.kind),
+                project.project.resolution,
             )?;
         }
         timeline.commit();
+
+        // Typed transitions: auto-transition created crossfades wherever
+        // clips overlap; re-type the ones whose right-hand clip asks for a
+        // wipe (nick like "bar-wipe-lr").
+        for (i, clip) in main.clips.iter().enumerate() {
+            let Some(kind) = clip.transition_kind.as_deref() else { continue };
+            if kind == "crossfade" || clip.transition.is_none() {
+                continue;
+            }
+            let boundary = positions[i].to_clocktime();
+            let enum_class =
+                gst::glib::EnumClass::with_type(ges::VideoStandardTransitionType::static_type())
+                    .ok_or_else(|| RenderError::Gst("no transition enum".into()))?;
+            let value = enum_class.value_by_nick(kind).ok_or_else(|| {
+                RenderError::Gst(format!(
+                    "unknown transition {kind:?} (try crossfade, bar-wipe-lr,                      bar-wipe-tb, box-wipe-tl, clock-cw)"
+                ))
+            })?;
+            for tclip in layer.clips() {
+                if tclip.is::<ges::TransitionClip>() && tclip.start() == boundary {
+                    tclip
+                        .set_child_property("vtype", &value.to_value(&enum_class))
+                        .map_err(|e| RenderError::Gst(format!("transition type: {e}")))?;
+                }
+            }
+        }
+        Ok(timeline)
+    }
+}
+
+impl RenderBackend for GesBackend {
+    fn render(
+        &self,
+        project: &Project,
+        project_dir: &Path,
+        output: &Path,
+    ) -> Result<(), RenderError> {
+        let timeline = build_timeline(project, project_dir)?;
 
         let video_profile = gst_pbutils::EncodingVideoProfile::builder(
             &gst::Caps::builder("video/x-h264").build(),
@@ -263,6 +379,69 @@ impl RenderBackend for GesBackend {
     }
 }
 
+/// Live composited preview: play the timeline through a GES preview
+/// pipeline — tracks, transforms, fades, titles, keyframes, NO render
+/// step. Video appears in a window (Hyprland tiles it); blocks until EOS.
+/// VIODE_PREVIEW_SINK=fake swaps in sync-less fakesinks (tests).
+pub fn preview_play(
+    project: &Project,
+    project_dir: &Path,
+    start: crate::Time,
+) -> Result<(), RenderError> {
+    let timeline = build_timeline(project, project_dir)?;
+    let pipeline = ges::Pipeline::new();
+    pipeline.set_timeline(&timeline)?;
+    if std::env::var_os("VIODE_PREVIEW_SINK").is_some_and(|v| v == "fake") {
+        let mk = |name: &str| {
+            gst::ElementFactory::make(name)
+                .property("sync", false)
+                .build()
+                .map_err(|e| RenderError::Gst(e.to_string()))
+        };
+        pipeline.set_property("video-sink", mk("fakesink")?);
+        pipeline.set_property("audio-sink", mk("fakesink")?);
+    }
+    pipeline.set_state(gst::State::Paused)?;
+    let bus = pipeline
+        .bus()
+        .ok_or_else(|| RenderError::Gst("pipeline has no bus".into()))?;
+    // Wait for preroll, then seek and roll.
+    let _ = bus.timed_pop_filtered(
+        gst::ClockTime::from_seconds(10),
+        &[gst::MessageType::AsyncDone, gst::MessageType::Error],
+    );
+    if start != crate::Time::ZERO {
+        let _ = pipeline.seek_simple(
+            gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE,
+            start.to_clocktime(),
+        );
+    }
+    pipeline.set_state(gst::State::Playing)?;
+    let mut result = Ok(());
+    for msg in bus.iter_timed(gst::ClockTime::NONE) {
+        match msg.view() {
+            gst::MessageView::Eos(..) => break,
+            gst::MessageView::Error(err) => {
+                result = Err(RenderError::Gst(format!("{}", err.error())));
+                break;
+            }
+            _ => {}
+        }
+    }
+    pipeline.set_state(gst::State::Null)?;
+    result
+}
+
+/// "#RRGGBB" or "#AARRGGBB" -> ARGB u32 (alpha defaults to FF).
+fn parse_color(s: &str) -> Option<u32> {
+    let hex = s.strip_prefix('#')?;
+    match hex.len() {
+        6 => u32::from_str_radix(hex, 16).ok().map(|v| 0xFF00_0000 | v),
+        8 => u32::from_str_radix(hex, 16).ok(),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Smart-copy backend: lossless, near-instant, keyframe-snapped cuts.
 
@@ -278,11 +457,20 @@ impl RenderBackend for SmartCopyBackend {
         // Stream-copy can only concatenate — no compositing.
         let simple = project.tracks.len() == 1
             && project.titles.is_empty()
-            && project
-                .main()
-                .clips
-                .iter()
-                .all(|c| c.transition.is_none() && c.effects.is_empty());
+            && project.main().clips.iter().all(|c| {
+                c.transition.is_none()
+                    && c.effects.is_empty()
+                    && c.rate.is_none()
+                    && c.pos.is_none()
+                    && c.scale.is_none()
+                    && c.rotate.is_none()
+                    && c.opacity.is_none()
+                    && c.color.is_none()
+                    && c.lut.is_none()
+                    && c.volume.is_none()
+                    && c.pan.is_none()
+                    && c.keys.is_empty()
+            });
         if !simple {
             return Err(RenderError::Gst(
                 "smart-copy only supports single-track cut-only projects \

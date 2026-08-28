@@ -434,7 +434,7 @@ fn multitrack_titles_fades_and_effects() {
         .args(["fade", "1", "0.5"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("crossfade: 00:00:00.500"));
+        .stdout(predicate::str::contains("transition: 00:00:00.500"));
     // 2 + 1 - 0.5 overlap = 2.5s.
     viode(&proj)
         .arg("ls")
@@ -643,6 +643,135 @@ fn viode_core_levels(path: &Path) -> Vec<(String, f64)> {
         }
     }
     levels
+}
+
+#[test]
+fn phase7_pro_editing_tools() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP phase7_pro_editing_tools: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "pro", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("pro");
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    make_clip(&tmp.path().join("b.mp4"), 2.0);
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+    viode(&proj).args(["add", "../b.mp4"]).assert().success();
+
+    // Transforms, color, speed, typed transition land in the file.
+    viode(&proj)
+        .args(["place", "0", "--x", "0.7", "--y", "0.05", "--scale", "0.25", "--opacity", "0.9"])
+        .assert()
+        .success();
+    viode(&proj)
+        .args(["color", "0", "--saturation", "0.0", "--contrast", "1.2"])
+        .assert()
+        .success();
+    viode(&proj).args(["speed", "1", "2.0"]).assert().success();
+    viode(&proj)
+        .args(["fade", "1", "0.5", "--kind", "bar-wipe-lr"])
+        .assert()
+        .success();
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    for needle in [
+        "scale = 0.25", "opacity = 0.9", "saturation = 0.0", "contrast = 1.2",
+        "rate = 2.0", "transition_kind = \"bar-wipe-lr\"",
+    ] {
+        assert!(toml.contains(needle), "missing {needle} in:\n{toml}");
+    }
+    // rate 2 halves clip 1 on the timeline: 2 + 1 - 0.5 fade = 2.5s.
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:02.500"));
+
+    // Trim grammar: give the boundary room first (interior in/out points,
+    // like real footage), then roll/slip must keep the total constant.
+    viode(&proj).args(["trim", "0", "--in", "0.2", "--out", "1.8"]).assert().success();
+    viode(&proj).args(["trim", "1", "--in", "0.5", "--out", "1.9"]).assert().success();
+    // 1.6 + (1.4 source / 2x) - 0.5 fade = 1.8s.
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:01.800"));
+    viode(&proj).args(["roll", "1", "-0.25"]).assert().success();
+    viode(&proj).args(["slip", "0", "0.1"]).assert().success();
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:01.800"));
+    // Rolling past the source start is refused, not silently clamped.
+    viode(&proj)
+        .args(["roll", "1", "-5"])
+        .assert()
+        .failure();
+
+    // Scopes are real PNGs.
+    viode(&proj).args(["scope", "0", "--kind", "waveform"]).assert().success();
+    viode(&proj).args(["scope", "0", "--kind", "vector"]).assert().success();
+    let bytes = std::fs::read(proj.join("cache/scope_0.png")).unwrap();
+    assert_eq!(&bytes[..4], b"\x89PNG");
+
+    // Media management: break a source, find it, relink it.
+    let hideout = tmp.path().join("moved");
+    std::fs::create_dir_all(&hideout).unwrap();
+    std::fs::rename(proj.join("media/b.mp4"), hideout.join("b.mp4")).unwrap();
+    viode(&proj)
+        .args(["media", "missing"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("b.mp4"));
+    viode(&proj)
+        .args(["relink", "../moved"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("relinked 1"));
+    viode(&proj)
+        .args(["media", "missing"])
+        .assert()
+        .stdout(predicate::str::contains("all media present"));
+
+    if !ges_available() {
+        eprintln!("SKIP phase7 render checks: GES not installed");
+        return;
+    }
+    // Speed renders shorter: solo the 2x clip -> ~1s output.
+    let solo = tmp.path().join("solo");
+    viode(tmp.path()).args(["new", "solo", "--res", "320x180"]).assert().success();
+    viode(&solo).args(["add", "../a.mp4"]).assert().success();
+    viode(&solo).args(["speed", "0", "2.0"]).assert().success();
+    viode(&solo).arg("render").assert().success();
+    let dur = probe_duration(&solo.join("renders/solo.mp4"));
+    assert!((dur - 1.0).abs() < 0.25, "2x of 2s should render ~1s, got {dur}");
+
+    // Codec breadth: ProRes comes out as ProRes in a .mov.
+    viode(&solo)
+        .args(["render", "--codec", "prores"])
+        .assert()
+        .success();
+    let out = Proc::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v", "-show_entries", "stream=codec_name", "-of", "csv=p=0"])
+        .arg(solo.join("renders/solo-prores.mov"))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "prores");
+
+    // The render queue runs jobs in order and empties itself.
+    viode(&solo).args(["queue", "add", "--codec", "h264"]).assert().success();
+    viode(&solo)
+        .args(["queue", "run"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("queue complete"));
+    assert!(solo.join("renders/solo-h264.mp4").exists());
+
+    // Live composited preview: full pipeline, fake sinks, must exit clean.
+    viode(&solo)
+        .env("VIODE_PREVIEW_SINK", "fake")
+        .args(["play"])
+        .assert()
+        .success();
 }
 
 #[test]

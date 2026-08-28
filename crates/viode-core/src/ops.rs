@@ -86,7 +86,7 @@ pub fn split(track: &mut Track, index: usize, at: Time) -> Result<(), OpError> {
     if at == Time::ZERO || at >= clip.len() {
         return Err(OpError::BadSplit(at, clip.len()));
     }
-    let mid = clip.in_ + at;
+    let mid = clip.in_ + clip.src_offset(at);
     let mut right = clip.clone();
     right.in_ = mid;
     right.transition = None;
@@ -253,7 +253,7 @@ pub fn replace_range(
         // Piece before the range.
         if c_start < start && start < c_end {
             let mut head = old.clone();
-            head.out = old.in_ + (start - c_start);
+            head.out = old.in_ + old.src_offset(start - c_start);
             result.push(head);
         } else if c_end <= start {
             result.push(old.clone());
@@ -266,7 +266,7 @@ pub fn replace_range(
         // Piece after the range.
         if c_start < end && end < c_end {
             let mut tail = old.clone();
-            tail.in_ = old.in_ + (end - c_start);
+            tail.in_ = old.in_ + old.src_offset(end - c_start);
             tail.transition = None;
             result.push(tail);
         }
@@ -278,6 +278,72 @@ pub fn replace_range(
     Ok(())
 }
 
+/// Signed nanosecond delta helpers for the trim grammar.
+fn shift(t: Time, delta_ns: i64) -> Result<Time, OpError> {
+    let v = t.0 as i64 + delta_ns;
+    if v < 0 {
+        return Err(OpError::BadRange(t, Time::ZERO));
+    }
+    Ok(Time(v as u64))
+}
+
+fn scaled(clip: &Clip, delta_ns: i64) -> i64 {
+    match clip.rate {
+        Some(r) if r > 0.0 => (delta_ns as f64 * r).round() as i64,
+        _ => delta_ns,
+    }
+}
+
+/// SLIP: shift a clip's source in AND out together — same timeline slot,
+/// different content. Total duration never changes.
+pub fn slip(track: &mut Track, index: usize, delta_ns: i64) -> Result<(), OpError> {
+    check_index(track, index)?;
+    let clip = &mut track.clips[index];
+    let d = scaled(clip, delta_ns);
+    let (new_in, new_out) = (shift(clip.in_, d)?, shift(clip.out, d)?);
+    clip.in_ = new_in;
+    clip.out = new_out;
+    Ok(())
+}
+
+/// ROLL: move the boundary between clip index-1 and index — the earlier
+/// clip gets longer, the later shorter (or vice versa). Total unchanged.
+pub fn roll(track: &mut Track, index: usize, delta_ns: i64) -> Result<(), OpError> {
+    check_index(track, index)?;
+    if index == 0 {
+        return Err(OpError::BadIndex(0, track.clips.len()));
+    }
+    let d_prev = scaled(&track.clips[index - 1], delta_ns);
+    let d_cur = scaled(&track.clips[index], delta_ns);
+    let prev_out = shift(track.clips[index - 1].out, d_prev)?;
+    let cur_in = shift(track.clips[index].in_, d_cur)?;
+    if prev_out <= track.clips[index - 1].in_ || cur_in >= track.clips[index].out {
+        return Err(OpError::BadRange(prev_out, cur_in));
+    }
+    track.clips[index - 1].out = prev_out;
+    track.clips[index].in_ = cur_in;
+    Ok(())
+}
+
+/// SLIDE: move clip index earlier/later in the sequence by trimming its
+/// neighbours — the clip's own content is untouched. Total unchanged.
+pub fn slide(track: &mut Track, index: usize, delta_ns: i64) -> Result<(), OpError> {
+    check_index(track, index)?;
+    if index == 0 || index + 1 >= track.clips.len() {
+        return Err(OpError::BadIndex(index, track.clips.len()));
+    }
+    let d_prev = scaled(&track.clips[index - 1], delta_ns);
+    let d_next = scaled(&track.clips[index + 1], delta_ns);
+    let prev_out = shift(track.clips[index - 1].out, d_prev)?;
+    let next_in = shift(track.clips[index + 1].in_, d_next)?;
+    if prev_out <= track.clips[index - 1].in_ || next_in >= track.clips[index + 1].out {
+        return Err(OpError::BadRange(prev_out, next_in));
+    }
+    track.clips[index - 1].out = prev_out;
+    track.clips[index + 1].in_ = next_in;
+    Ok(())
+}
+
 /// Map a timeline position to (main-track clip index, time within that
 /// clip's source). Returns None past the end of the sequence.
 pub fn source_at(project: &Project, at: Time) -> Option<(usize, Time)> {
@@ -286,7 +352,7 @@ pub fn source_at(project: &Project, at: Time) -> Option<(usize, Time)> {
     for (i, clip) in track.clips.iter().enumerate() {
         let start = positions[i];
         if at >= start && at < start + clip.len() {
-            return Some((i, clip.in_ + (at - start)));
+            return Some((i, clip.in_ + clip.src_offset(at - start)));
         }
     }
     None
@@ -316,10 +382,10 @@ pub fn extract_range(project: &Project, start: Time, end: Time) -> Result<Projec
         let mut trimmed = clip.clone();
         trimmed.transition = None;
         if start > clip_start {
-            trimmed.in_ = clip.in_ + (start - clip_start);
+            trimmed.in_ = clip.in_ + clip.src_offset(start - clip_start);
         }
         if end < clip_end {
-            trimmed.out = clip.in_ + (end - clip_start);
+            trimmed.out = clip.in_ + clip.src_offset(end - clip_start);
         }
         out.main_mut().clips.push(trimmed);
     }
@@ -333,10 +399,11 @@ pub fn extract_range(project: &Project, start: Time, end: Time) -> Result<Projec
             }
             let mut trimmed = clip.clone();
             if start > c_start {
-                trimmed.in_ = clip.in_ + (start - c_start);
+                trimmed.in_ = clip.in_ + clip.src_offset(start - c_start);
             }
             if end < c_end {
-                trimmed.out = trimmed.in_ + (end.min(c_end) - start.max(c_start));
+                trimmed.out =
+                    trimmed.in_ + clip.src_offset(end.min(c_end) - start.max(c_start));
             }
             trimmed.at = Some(c_start.max(start) - start);
             sub.clips.push(trimmed);
@@ -458,7 +525,7 @@ mod tests {
         over.at = Some(t(3.0)); // covers 3..5
         overlay.clips.push(over);
         p.tracks.push(overlay);
-        p.titles.push(Title { text: "hi".into(), at: t(1.0), dur: t(4.0), font: None });
+        p.titles.push(Title { text: "hi".into(), at: t(1.0), dur: t(4.0), font: None, xpos: None, ypos: None, color: None });
 
         let sub = extract_range(&p, t(2.0), t(4.0)).unwrap();
         assert_eq!(sub.main().clips.len(), 2);
@@ -515,6 +582,49 @@ mod tests {
     fn remove_source_ranges_refuses_to_delete_everything() {
         let mut p = project();
         assert!(remove_source_ranges(p.main_mut(), 0, &[(t(0.0), t(3.0))], Time::ZERO).is_err());
+    }
+
+    #[test]
+    fn rate_scales_timeline_length_and_mapping() {
+        let mut p = project();
+        p.main_mut().clips[0].rate = Some(2.0); // 3s of source in 1.5s
+        assert_eq!(p.main().clips[0].len(), t(1.5));
+        assert_eq!(p.total_duration(), t(4.5));
+        // Timeline 1.0 into a 2x clip = source 2.0.
+        assert_eq!(source_at(&p, t(1.0)), Some((0, t(2.0))));
+        // Splitting at timeline 0.75 cuts the source at 1.5.
+        split(p.main_mut(), 0, t(0.75)).unwrap();
+        assert_eq!(p.main().clips[0].out, t(1.5));
+        assert_eq!(p.total_duration(), t(4.5), "split never changes duration");
+    }
+
+    #[test]
+    fn slip_roll_slide_preserve_total_duration() {
+        // clips: a[0..3], b[1..4] -> total 6.
+        let mut p = project();
+        let before = p.total_duration();
+
+        slip(p.main_mut(), 1, 500_000_000).unwrap(); // b -> [1.5..4.5]
+        assert_eq!(p.main().clips[1].in_, t(1.5));
+        assert_eq!(p.total_duration(), before);
+
+        roll(p.main_mut(), 1, -1_000_000_000).unwrap(); // boundary 1s earlier
+        assert_eq!(p.main().clips[0].out, t(2.0));
+        assert_eq!(p.main().clips[1].in_, t(0.5));
+        assert_eq!(p.total_duration(), before);
+
+        // Slide needs a middle clip.
+        let mut p3 = project();
+        p3.main_mut().clips.push(clip(0.0, 2.0));
+        let before3 = p3.total_duration();
+        slide(p3.main_mut(), 1, 500_000_000).unwrap();
+        assert_eq!(p3.main().clips[0].out, t(3.5));
+        assert_eq!(p3.main().clips[2].in_, t(0.5));
+        assert_eq!(p3.total_duration(), before3);
+
+        // Degenerate results are refused.
+        assert!(roll(p.main_mut(), 1, -10_000_000_000).is_err());
+        assert!(slide(p3.main_mut(), 0, 1).is_err(), "slide needs neighbours");
     }
 
     #[test]

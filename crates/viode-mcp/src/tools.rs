@@ -136,11 +136,122 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "fade_set",
-            "Crossfade a main-track clip with the previous one (duration 0 \
-             clears it).",
-            json!({ "index": {"type": "integer"}, "duration": time_schema }),
+            "Transition a main-track clip with the previous one (duration 0 \
+             clears). kind: crossfade (default), bar-wipe-lr, bar-wipe-tb, \
+             box-wipe-tl, clock-cw.",
+            json!({
+                "index": {"type": "integer"},
+                "duration": time_schema,
+                "kind": {"type": "string"},
+            }),
             &["index", "duration"],
         ),
+        tool(
+            "place_set",
+            "Position/scale/rotate/opacity a clip — picture-in-picture, \
+             corner cams. x/y are fractions of the frame; scale 0.25 = \
+             quarter-size; clear resets to full frame.",
+            json!({
+                "index": {"type": "integer"},
+                "x": {"type": "number"}, "y": {"type": "number"},
+                "scale": {"type": "number"}, "rotate": {"type": "number"},
+                "opacity": {"type": "number"},
+                "track": {"type": "integer", "default": 0},
+                "clear": {"type": "boolean", "default": false},
+            }),
+            &["index"],
+        ),
+        tool(
+            "color_set",
+            "Color grade a clip: brightness (-1..1, neutral 0), contrast/\
+             saturation (0..2, neutral 1), hue (-1..1), optional .cube LUT.",
+            json!({
+                "index": {"type": "integer"},
+                "brightness": {"type": "number"}, "contrast": {"type": "number"},
+                "saturation": {"type": "number"}, "hue": {"type": "number"},
+                "lut": {"type": "string"},
+                "track": {"type": "integer", "default": 0},
+                "clear": {"type": "boolean", "default": false},
+            }),
+            &["index"],
+        ),
+        tool(
+            "scope",
+            "Waveform or vectorscope image of a frame — judge exposure and \
+             color like a colorist.",
+            json!({
+                "index": {"type": "integer"},
+                "at": time_schema,
+                "kind": {"type": "string", "enum": ["waveform", "vector"], "default": "waveform"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "speed_set",
+            "Playback rate: 2 = double speed, 0.5 = slow motion, 1 clears. \
+             Timeline length rescales automatically.",
+            json!({
+                "index": {"type": "integer"},
+                "rate": {"type": "number"},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "rate"],
+        ),
+        tool(
+            "roll",
+            "Move the boundary between clip index-1 and index by ±seconds — \
+             total duration unchanged.",
+            json!({ "index": {"type": "integer"}, "delta": {"type": "number"} }),
+            &["index", "delta"],
+        ),
+        tool(
+            "slip",
+            "Shift a clip's SOURCE content by ±seconds without moving its \
+             timeline slot.",
+            json!({ "index": {"type": "integer"}, "delta": {"type": "number"} }),
+            &["index", "delta"],
+        ),
+        tool(
+            "slide",
+            "Move a clip against its neighbours by ±seconds — its content \
+             untouched, total unchanged.",
+            json!({ "index": {"type": "integer"}, "delta": {"type": "number"} }),
+            &["index", "delta"],
+        ),
+        tool(
+            "play",
+            "Open the LIVE composited preview in a window on the user's \
+             screen (no render step). Returns immediately.",
+            json!({ "from": time_schema }),
+            &[],
+        ),
+        tool(
+            "media_missing",
+            "Clips whose source files no longer exist on disk.",
+            json!({}),
+            &[],
+        ),
+        tool(
+            "relink",
+            "Reconnect missing media by filename, searching a directory \
+             recursively.",
+            json!({ "dir": {"type": "string"} }),
+            &["dir"],
+        ),
+        tool(
+            "queue_add",
+            "Queue a render job (preset OR codec+bitrate, optional output).",
+            json!({
+                "preset": {"type": "string", "enum": ["youtube", "shorts", "podcast"]},
+                "codec": {"type": "string", "enum": ["h264", "hevc", "av1", "prores", "dnxhr"]},
+                "bitrate": {"type": "integer"},
+                "output": {"type": "string"},
+            }),
+            &[],
+        ),
+        tool("queue_list", "List queued render jobs.", json!({}), &[]),
+        tool("queue_run", "Run every queued render job in order.", json!({}), &[]),
+        tool("queue_clear", "Clear the render queue.", json!({}), &[]),
         tool(
             "fx_add",
             "Add a GStreamer effect to a clip, e.g. \"videobalance \
@@ -169,6 +280,9 @@ pub fn definitions() -> Vec<Value> {
                 "at": time_schema,
                 "dur": time_schema,
                 "font": {"type": "string", "description": "Pango font description, e.g. \"Sans Bold 64\""},
+                "x": {"type": "number", "description": "0..1 horizontal"},
+                "y": {"type": "number", "description": "0..1 vertical (0.8 = lower third)"},
+                "color": {"type": "string", "description": "#RRGGBB"},
             }),
             &["text", "at", "dur"],
         ),
@@ -343,6 +457,9 @@ pub fn definitions() -> Vec<Value> {
             json!({
                 "output": {"type": "string", "description": "defaults to renders/<name>.mp4"},
                 "preset": {"type": "string", "enum": ["youtube", "shorts", "podcast"]},
+                "codec": {"type": "string", "enum": ["h264", "hevc", "av1", "prores", "dnxhr"]},
+                "bitrate": {"type": "integer", "description": "kbps (with codec)"},
+                "smooth": {"type": "integer", "description": "optical-flow interpolate to this fps"},
             }),
             &[],
         ),
@@ -424,10 +541,106 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             Ok(())
         }),
         "fade_set" => edit(server, |p| {
+            let index = index_arg(args, "index")?;
             let d = time_req(args, "duration")?;
             let d = (d != Time::ZERO).then_some(d);
-            Ok(ops::set_transition(p.main_mut(), index_arg(args, "index")?, d)?)
+            ops::set_transition(p.main_mut(), index, d)?;
+            p.main_mut().clips[index].transition_kind = args
+                .get("kind")
+                .and_then(Value::as_str)
+                .map(String::from)
+                .filter(|_| d.is_some());
+            Ok(())
         }),
+        "place_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            if args.get("clear").and_then(Value::as_bool).unwrap_or(false) {
+                (c.pos, c.scale, c.rotate, c.opacity) = (None, None, None, None);
+                return Ok(());
+            }
+            let (x, y) = (args.get("x").and_then(Value::as_f64), args.get("y").and_then(Value::as_f64));
+            if x.is_some() || y.is_some() {
+                let old = c.pos.unwrap_or([0.0, 0.0]);
+                c.pos = Some([x.unwrap_or(old[0]), y.unwrap_or(old[1])]);
+            }
+            if let Some(v) = args.get("scale").and_then(Value::as_f64) {
+                c.scale = Some(v);
+            }
+            if let Some(v) = args.get("rotate").and_then(Value::as_f64) {
+                c.rotate = Some(v);
+            }
+            if let Some(v) = args.get("opacity").and_then(Value::as_f64) {
+                if !(0.0..=1.0).contains(&v) {
+                    bail!("opacity {v} out of range (0..1)");
+                }
+                c.opacity = Some(v);
+            }
+            Ok(())
+        }),
+        "color_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            if args.get("clear").and_then(Value::as_bool).unwrap_or(false) {
+                c.color = None;
+                c.lut = None;
+                return Ok(());
+            }
+            let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
+                brightness: None, contrast: None, saturation: None, hue: None,
+            });
+            for (key, slot) in [
+                ("brightness", &mut g.brightness),
+                ("contrast", &mut g.contrast),
+                ("saturation", &mut g.saturation),
+                ("hue", &mut g.hue),
+            ] {
+                if let Some(v) = args.get(key).and_then(Value::as_f64) {
+                    *slot = Some(v);
+                }
+            }
+            c.color = Some(g);
+            if let Some(l) = args.get("lut").and_then(Value::as_str) {
+                c.lut = Some(PathBuf::from(l));
+            }
+            Ok(())
+        }),
+        "speed_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let rate = args.get("rate").and_then(Value::as_f64).context("missing rate")?;
+            if rate <= 0.0 || rate > 20.0 {
+                bail!("rate {rate} out of range (0..20]");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.rate = (rate != 1.0).then_some(rate);
+            Ok(())
+        }),
+        "roll" => edit(server, |p| {
+            let d = (args.get("delta").and_then(Value::as_f64).context("missing delta (seconds)")? * 1e9) as i64;
+            Ok(ops::roll(p.main_mut(), index_arg(args, "index")?, d)?)
+        }),
+        "slip" => edit(server, |p| {
+            let d = (args.get("delta").and_then(Value::as_f64).context("missing delta (seconds)")? * 1e9) as i64;
+            Ok(ops::slip(p.main_mut(), index_arg(args, "index")?, d)?)
+        }),
+        "slide" => edit(server, |p| {
+            let d = (args.get("delta").and_then(Value::as_f64).context("missing delta (seconds)")? * 1e9) as i64;
+            Ok(ops::slide(p.main_mut(), index_arg(args, "index")?, d)?)
+        }),
+        "scope" => scope_tool(server, args),
+        "play" => play_tool(server, args),
+        "media_missing" => media_missing(server),
+        "relink" => relink_tool(server, args),
+        "queue_add" => queue_add(server, args),
+        "queue_list" => queue_list(server),
+        "queue_run" => queue_run(server),
+        "queue_clear" => queue_clear(server),
         "track_add" => edit(server, |p| {
             let kind = match args.get("kind").and_then(Value::as_str).unwrap_or("av") {
                 "av" => viode_core::TrackKind::Av,
@@ -477,6 +690,9 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
                 at: time_req(args, "at")?,
                 dur: time_req(args, "dur")?,
                 font: args.get("font").and_then(Value::as_str).map(String::from),
+                xpos: args.get("x").and_then(Value::as_f64),
+                ypos: args.get("y").and_then(Value::as_f64),
+                color: args.get("color").and_then(Value::as_str).map(String::from),
             });
             Ok(())
         }),
@@ -935,6 +1151,135 @@ fn text_cut(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     Ok(content)
 }
 
+fn scope_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (index, _, src) = clip_and_source(server, args)?;
+    let (_, dir) = require_project(server)?;
+    let at = time_opt(args, "at")?.unwrap_or(Time::ZERO);
+    let kind = args.get("kind").and_then(Value::as_str).unwrap_or("waveform");
+    let filter = match kind {
+        "waveform" => "waveform=graticule=green:intensity=0.1",
+        "vector" | "vectorscope" => "vectorscope=graticule=green",
+        other => bail!("unknown scope {other:?} (waveform, vector)"),
+    };
+    let dest = dir.join("cache").join(format!("scope_{index}.png"));
+    std::fs::create_dir_all(dest.parent().unwrap())?;
+    let out = Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-ss", &at.as_secs_f64().to_string(), "-i"])
+        .arg(&src)
+        .args(["-frames:v", "1", "-vf", filter])
+        .arg(&dest)
+        .output()?;
+    if !out.status.success() {
+        bail!("scope failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+    }
+    let bytes = std::fs::read(&dest)?;
+    Ok(png_content(&bytes, format!("{kind} scope of clip {index} at source {at}")))
+}
+
+/// Open the LIVE composited preview in a window (detached — the tool
+/// returns immediately; the user closes the window).
+fn play_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, _) = require_project(server)?;
+    let from = time_opt(args, "from")?.unwrap_or(Time::ZERO);
+    let exe = std::env::current_exe()?;
+    Command::new(exe)
+        .arg("--project")
+        .arg(&file)
+        .arg("play")
+        .arg("--from")
+        .arg(from.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(text(format!(
+        "live preview window opened from {from} — no render step; the user closes it"
+    )))
+}
+
+fn media_missing(server: &Server) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let project = Project::load(&file)?;
+    let lost = viode_core::media::missing(&project, &dir);
+    let items: Vec<Value> = lost
+        .iter()
+        .map(|(ti, ci, src)| json!({"track": ti, "clip": ci, "src": src}))
+        .collect();
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "missing": items,
+        "note": "relink {dir} reconnects by filename",
+    }))?))
+}
+
+fn relink_tool(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let new_dir = PathBuf::from(str_arg(args, "dir")?);
+    let mut project = Project::load(&file)?;
+    let n = viode_core::media::relink(&mut project, &dir, &new_dir);
+    project.save(&file)?;
+    let still = viode_core::media::missing(&project, &dir).len();
+    Ok(text(format!("relinked {n} clip(s); {still} still missing")))
+}
+
+fn queue_add(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (_, dir) = require_project(server)?;
+    let mut q = viode_core::queue::load(&dir)?;
+    q.jobs.push(viode_core::queue::QueueJob {
+        preset: args.get("preset").and_then(Value::as_str).map(String::from),
+        codec: args.get("codec").and_then(Value::as_str).map(String::from),
+        bitrate: args.get("bitrate").and_then(Value::as_u64).map(|b| b as u32),
+        output: args.get("output").and_then(Value::as_str).map(PathBuf::from),
+    });
+    viode_core::queue::save(&dir, &q)?;
+    Ok(text(format!("queued job {} — queue_run executes all", q.jobs.len())))
+}
+
+fn queue_list(server: &Server) -> Result<Vec<Value>> {
+    let (_, dir) = require_project(server)?;
+    let q = viode_core::queue::load(&dir)?;
+    Ok(text(serde_json::to_string_pretty(&json!({
+        "jobs": q.jobs.iter().map(|j| json!({
+            "preset": j.preset, "codec": j.codec,
+            "bitrate": j.bitrate, "output": j.output,
+        })).collect::<Vec<_>>(),
+    }))?))
+}
+
+fn queue_run(server: &mut Server) -> Result<Vec<Value>> {
+    let (_, dir) = require_project(server)?;
+    let q = viode_core::queue::load(&dir)?;
+    if q.jobs.is_empty() {
+        bail!("queue empty");
+    }
+    let mut outputs = Vec::new();
+    for job in &q.jobs {
+        let mut args = serde_json::Map::new();
+        if let Some(p) = &job.preset {
+            args.insert("preset".into(), json!(p));
+        }
+        if let Some(c) = &job.codec {
+            args.insert("codec".into(), json!(c));
+        }
+        if let Some(b) = job.bitrate {
+            args.insert("bitrate".into(), json!(b));
+        }
+        if let Some(o) = &job.output {
+            args.insert("output".into(), json!(o.display().to_string()));
+        }
+        let result = render(server, &Value::Object(args))?;
+        outputs.extend(result);
+    }
+    viode_core::queue::save(&dir, &viode_core::queue::RenderQueue::default())?;
+    outputs.push(json!({"type": "text", "text": format!("queue complete ({} jobs)", q.jobs.len())}));
+    Ok(outputs)
+}
+
+fn queue_clear(server: &Server) -> Result<Vec<Value>> {
+    let (_, dir) = require_project(server)?;
+    viode_core::queue::save(&dir, &viode_core::queue::RenderQueue::default())?;
+    Ok(text("queue cleared"))
+}
+
 fn png_content(bytes: &[u8], caption: String) -> Vec<Value> {
     vec![
         json!({
@@ -1110,28 +1455,50 @@ fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
         None => None,
     };
 
-    let master = match preset {
-        Some(_) => dir.join("cache").join("master.mp4"),
-        None => match args.get("output").and_then(Value::as_str) {
+    let codec = match args.get("codec").and_then(Value::as_str) {
+        Some(c) => Some(
+            viode_core::Codec::parse(c)
+                .with_context(|| format!("unknown codec {c:?} (h264, hevc, av1, prores, dnxhr)"))?,
+        ),
+        None => None,
+    };
+    let smooth = args.get("smooth").and_then(Value::as_u64).map(|f| f as u32);
+    let needs_post = preset.is_some() || codec.is_some() || smooth.is_some();
+    let master = if needs_post {
+        dir.join("cache").join("master.mp4")
+    } else {
+        match args.get("output").and_then(Value::as_str) {
             Some(o) => dir.join(o),
             None => dir.join("renders").join(format!("{name}.mp4")),
-        },
+        }
     };
     GesBackend.render(&project, &dir, &master)?;
 
+    let requested_out = args.get("output").and_then(Value::as_str).map(|o| dir.join(o));
     let final_path = if let Some(preset) = preset {
         let suffix = match preset {
             viode_core::Preset::Youtube => "youtube",
             viode_core::Preset::Shorts => "shorts",
             viode_core::Preset::Podcast => "podcast",
         };
-        let out = match args.get("output").and_then(Value::as_str) {
-            Some(o) => dir.join(o),
-            None => dir
-                .join("renders")
-                .join(format!("{name}-{suffix}.{}", preset.extension())),
-        };
+        let out = requested_out.unwrap_or_else(|| {
+            dir.join("renders")
+                .join(format!("{name}-{suffix}.{}", preset.extension()))
+        });
         viode_core::apply_preset(&master, &out, preset)?;
+        out
+    } else if let Some(codec) = codec {
+        let out = requested_out.unwrap_or_else(|| {
+            dir.join("renders")
+                .join(format!("{name}-{codec:?}.{}", codec.extension()).to_lowercase())
+        });
+        let bitrate = args.get("bitrate").and_then(Value::as_u64).map(|b| b as u32);
+        viode_core::transcode(&master, &out, codec, bitrate)?;
+        out
+    } else if let Some(fps) = smooth {
+        let out = requested_out
+            .unwrap_or_else(|| dir.join("renders").join(format!("{name}-smooth.mp4")));
+        viode_core::smooth(&master, &out, fps)?;
         out
     } else {
         master

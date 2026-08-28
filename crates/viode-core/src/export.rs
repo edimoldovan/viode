@@ -40,6 +40,117 @@ impl Preset {
     }
 }
 
+/// Delivery/interchange codecs beyond the H.264 master.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Codec {
+    H264,
+    Hevc,
+    Av1,
+    Prores,
+    Dnxhr,
+}
+
+impl Codec {
+    pub fn parse(s: &str) -> Option<Codec> {
+        match s.to_ascii_lowercase().as_str() {
+            "h264" => Some(Codec::H264),
+            "hevc" | "h265" => Some(Codec::Hevc),
+            "av1" => Some(Codec::Av1),
+            "prores" => Some(Codec::Prores),
+            "dnxhr" | "dnxhd" => Some(Codec::Dnxhr),
+            _ => None,
+        }
+    }
+
+    pub fn extension(self) -> &'static str {
+        match self {
+            Codec::Prores | Codec::Dnxhr => "mov",
+            _ => "mp4",
+        }
+    }
+}
+
+/// Transcode the master for delivery/interchange. `bitrate_kbps` switches
+/// from quality-targeted (CRF) to bitrate-targeted encoding.
+pub fn transcode(
+    master: &Path,
+    output: &Path,
+    codec: Codec,
+    bitrate_kbps: Option<u32>,
+) -> Result<(), ExportError> {
+    if let Some(dir) = output.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(["-y", "-loglevel", "error", "-i"]).arg(master);
+    match codec {
+        Codec::H264 => {
+            cmd.args(["-c:v", "libx264", "-preset", "medium"]);
+        }
+        Codec::Hevc => {
+            cmd.args(["-c:v", "libx265", "-preset", "medium", "-tag:v", "hvc1"]);
+        }
+        Codec::Av1 => {
+            cmd.args(["-c:v", "libsvtav1", "-preset", "6"]);
+        }
+        Codec::Prores => {
+            cmd.args(["-c:v", "prores_ks", "-profile:v", "3", "-c:a", "pcm_s16le"]);
+        }
+        Codec::Dnxhr => {
+            cmd.args(["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-c:a", "pcm_s16le"]);
+        }
+    }
+    match (codec, bitrate_kbps) {
+        (_, Some(kbps)) => {
+            cmd.args(["-b:v", &format!("{kbps}k")]);
+        }
+        (Codec::H264, None) => {
+            cmd.args(["-crf", "18"]);
+        }
+        (Codec::Hevc, None) => {
+            cmd.args(["-crf", "22"]);
+        }
+        (Codec::Av1, None) => {
+            cmd.args(["-crf", "30"]);
+        }
+        _ => {}
+    }
+    if !matches!(codec, Codec::Prores | Codec::Dnxhr) {
+        cmd.args(["-c:a", "aac", "-b:a", "256k"]);
+    }
+    let out = cmd.arg(output).output()?;
+    if !out.status.success() {
+        return Err(ExportError::Ffmpeg(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Optical-flow frame interpolation (ffmpeg minterpolate) — smooths
+/// slow-motion footage to `target_fps` instead of duplicating frames.
+pub fn smooth(master: &Path, output: &Path, target_fps: u32) -> Result<(), ExportError> {
+    if let Some(dir) = output.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let out = Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-i"])
+        .arg(master)
+        .args([
+            "-vf",
+            &format!("minterpolate=fps={target_fps}:mi_mode=mci"),
+            "-c:v", "libx264", "-crf", "18", "-c:a", "copy",
+        ])
+        .arg(output)
+        .output()?;
+    if !out.status.success() {
+        return Err(ExportError::Ffmpeg(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
     #[error("failed to run ffmpeg (is ffmpeg installed?): {0}")]
@@ -145,6 +256,15 @@ fn measure_loudness(master: &Path, target_i: f64) -> Result<Measured, ExportErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn codec_parsing() {
+        assert_eq!(Codec::parse("ProRes"), Some(Codec::Prores));
+        assert_eq!(Codec::parse("h265"), Some(Codec::Hevc));
+        assert_eq!(Codec::parse("vp8"), None);
+        assert_eq!(Codec::Prores.extension(), "mov");
+        assert_eq!(Codec::Av1.extension(), "mp4");
+    }
 
     #[test]
     fn preset_parsing() {
