@@ -35,6 +35,7 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
     let mut playing_ticks = 0u32;
     let mut empty_ticks = 0u32;
     let mut force_emit = false;
+    let mut reflow_pending = false;
     loop {
         app.reap();
         app.media.pump();
@@ -47,6 +48,15 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
         // never touches mpv's frame. Our own kitty images stay suppressed
         // so we don't delete mpv's.
         if app.is_playing() {
+            if reflow_pending {
+                // One draw first so preview_area reflects the new size.
+                terminal.draw(|f| {
+                    ui::draw(f, app);
+                })?;
+                app.reflow_playback();
+                reflow_pending = false;
+                playing_ticks = 0; // re-send strips at the new layout
+            }
             terminal.swap_buffers();
             terminal.current_buffer_mut().reset();
             terminal.swap_buffers();
@@ -71,11 +81,10 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
                     _ => {}
                 },
                 Event::Resize(..) => {
-                    // mpv's pane geometry was fixed at spawn — stop
-                    // cleanly rather than paint in the wrong place.
-                    app.stop_preview();
-                    force_emit = true;
-                    app.message = "resized — space to play again".into();
+                    // mpv's pane geometry was fixed at spawn: respawn at
+                    // the new geometry, same position, same pause state —
+                    // after the next draw refreshes preview_area.
+                    reflow_pending = true;
                 }
                 _ => {}
             }

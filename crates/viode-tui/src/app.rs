@@ -42,6 +42,7 @@ pub struct App {
     /// Pane the inline player renders into (set by ui::draw each frame).
     pub preview_area: Option<ratatui::layout::Rect>,
     preview: Option<crate::preview::Preview>,
+    last_play_target: Option<PathBuf>,
     image_refresh: bool,
     confirm_quit: bool,
     undo: Vec<Project>,
@@ -69,6 +70,7 @@ impl App {
             media: crate::media::MediaCache::new(&project_dir),
             preview_area: None,
             preview: None,
+            last_play_target: None,
             image_refresh: false,
             confirm_quit: false,
             undo: Vec::new(),
@@ -393,18 +395,35 @@ impl App {
     }
 
     fn spawn_preview(&mut self, target: &Path, start: f64) {
+        self.spawn_preview_state(target, start, false);
+    }
+
+    fn spawn_preview_state(&mut self, target: &Path, start: f64, paused: bool) {
         let Some(area) = self.preview_area.filter(|a| a.width > 8 && a.height > 4) else {
             self.message = "terminal too small for the preview pane".into();
             return;
         };
         let sock = self.project_dir.join("cache").join("mpv.sock");
-        match crate::preview::Preview::spawn(target, area, start, sock) {
+        match crate::preview::Preview::spawn(target, area, start, paused, sock) {
             Ok(p) => {
                 self.preview = Some(p);
+                self.last_play_target = Some(target.to_path_buf());
                 self.message = "playing — space pause · x stop".into();
             }
             Err(e) => self.message = format!("mpv failed (is mpv installed?): {e}"),
         }
+    }
+
+    /// The terminal changed shape under a live player: respawn mpv at the
+    /// new pane geometry, at the same position, preserving pause state.
+    pub fn reflow_playback(&mut self) {
+        let Some(target) = self.last_play_target.clone() else { return };
+        let state = self.preview.as_ref().and_then(|p| p.position());
+        if let Some(mut p) = self.preview.take() {
+            p.stop();
+        }
+        let (pos, paused) = state.unwrap_or((0.0, false));
+        self.spawn_preview_state(&target, pos, paused);
     }
 
     /// P: the accurate path — GES renders the full composite (tracks,

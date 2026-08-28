@@ -48,11 +48,13 @@ impl Preview {
         target: &Path,
         area: ratatui::layout::Rect,
         start_secs: f64,
+        paused: bool,
         sock: std::path::PathBuf,
     ) -> std::io::Result<Preview> {
         let _ = std::fs::remove_file(&sock);
         let child = Command::new("mpv")
             .arg("--vo=kitty")
+            .arg(format!("--pause={}", if paused { "yes" } else { "no" }))
             // kitty vo geometry is 1-based terminal cells.
             .arg(format!("--vo-kitty-left={}", area.x + 1))
             .arg(format!("--vo-kitty-top={}", area.y + 1))
@@ -70,6 +72,36 @@ impl Preview {
             .stderr(std::process::Stdio::null())
             .spawn()?;
         Ok(Preview { child, sock })
+    }
+
+    /// Ask mpv where it is: (seconds into the playlist, paused?). Best
+    /// effort with a short timeout — None if mpv isn't answering.
+    pub fn position(&self) -> Option<(f64, bool)> {
+        use std::io::{BufRead, BufReader, Write};
+        let mut stream = std::os::unix::net::UnixStream::connect(&self.sock).ok()?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(300)))
+            .ok()?;
+        writeln!(stream, "{{\"command\":[\"get_property\",\"time-pos\"],\"request_id\":1}}").ok()?;
+        writeln!(stream, "{{\"command\":[\"get_property\",\"pause\"],\"request_id\":2}}").ok()?;
+        let reader = BufReader::new(stream);
+        let (mut pos, mut paused) = (None, None);
+        for line in reader.lines() {
+            let Ok(line) = line else { break };
+            if line.contains("\"request_id\":1") {
+                pos = line
+                    .split("\"data\":")
+                    .nth(1)
+                    .and_then(|r| r.split([',', '}']).next())
+                    .and_then(|v| v.trim().parse::<f64>().ok());
+            } else if line.contains("\"request_id\":2") {
+                paused = Some(line.contains("\"data\":true"));
+            }
+            if pos.is_some() && paused.is_some() {
+                break;
+            }
+        }
+        Some((pos?, paused.unwrap_or(false)))
     }
 
     pub fn toggle_pause(&self) {
