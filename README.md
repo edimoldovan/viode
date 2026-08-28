@@ -83,12 +83,14 @@ Protocol: [scripts/test-real-media.sh](scripts/test-real-media.sh).
 | Build a 2h53m two-film timeline | 0.4s |
 | 50 splits across that 3-hour timeline | 0.15s (~3ms per edit) |
 | Silence scan over 92 min of rapid dialogue | 8.6s (~640× realtime) |
-| Proxy ~3h of footage | 125s (~85× realtime) |
+| Proxy ~3h of footage (parallel per-file) | 77.8s (~135× realtime) |
 | Multicam auto-sync on real 1940s audio | 4.0s — found the 2.000s offset **exactly** |
 | Cut to the synced angle (`take`) | instant |
 | Render an 80s composite (wipe + grade + 1.5× speed + PiP + title) | 4.9s |
 | Loudness-normalized podcast export | 7.6s |
 | ProRes interchange export | 10.2s |
+| Scene detection on 10 min of 4K60 (via proxy) | 2.6s (was 52.2s on the original — 20×) |
+| Repeat audio analysis (cached) | 0.01s |
 | Probe a 1-hour 4K60 file | 2.4s |
 | Proxy 1 hour of 4K60 | 6m21s (~10× realtime — within 1.4× of the raw decode floor) |
 | Render 30s of true 3840×2160@60 | 17.8s (1.7× realtime) |

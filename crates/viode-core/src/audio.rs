@@ -97,27 +97,29 @@ pub fn audio_scan(
     min_duration: f64,
     window: f64,
 ) -> Result<AudioScan, AnalyzeError> {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    path.hash(&mut h);
-    if let Ok(m) = std::fs::metadata(path) {
-        m.len().hash(&mut h);
-        if let Ok(t) = m.modified() {
-            if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
-                d.as_secs().hash(&mut h);
-            }
-        }
-    }
-    noise_db.to_bits().hash(&mut h);
-    min_duration.to_bits().hash(&mut h);
-    window.to_bits().hash(&mut h);
-    let cache = project_dir
+    // The two halves cache INDEPENDENTLY: a silences query and a levels
+    // query with unrelated parameters still share the one decode that
+    // produced them both.
+    let file_key = file_identity(path);
+    let sil_cache = project_dir.join("cache").join(format!(
+        "audiosil_{file_key:016x}_{:x}_{:x}.json",
+        noise_db.to_bits(),
+        min_duration.to_bits()
+    ));
+    let lvl_cache = project_dir
         .join("cache")
-        .join(format!("audioscan_{:016x}.json", h.finish()));
-    if let Ok(text) = std::fs::read_to_string(&cache) {
-        if let Ok(scan) = serde_json::from_str::<AudioScan>(&text) {
-            return Ok(scan);
-        }
+        .join(format!("audiolvl_{file_key:016x}_{:x}.json", window.to_bits()));
+    let cached_sil: Option<Vec<(Time, Time)>> = std::fs::read_to_string(&sil_cache)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    let cached_lvl: Option<Vec<(Time, f64)>> = std::fs::read_to_string(&lvl_cache)
+        .ok()
+        .and_then(|t| serde_json::from_str(&t).ok());
+    if let (Some(silences), Some(levels)) = (&cached_sil, &cached_lvl) {
+        return Ok(AudioScan {
+            silences: silences.clone(),
+            levels: levels.clone(),
+        });
     }
 
     let samples_per_window = ((window * 8000.0).round() as u64).max(1);
@@ -179,10 +181,28 @@ pub fn audio_scan(
 
     let scan = AudioScan { silences, levels };
     let _ = std::fs::create_dir_all(project_dir.join("cache"));
-    if let Ok(json) = serde_json::to_string(&scan) {
-        let _ = std::fs::write(&cache, json);
+    if let Ok(json) = serde_json::to_string(&scan.silences) {
+        let _ = std::fs::write(&sil_cache, json);
+    }
+    if let Ok(json) = serde_json::to_string(&scan.levels) {
+        let _ = std::fs::write(&lvl_cache, json);
     }
     Ok(scan)
+}
+
+fn file_identity(path: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut h);
+    if let Ok(m) = std::fs::metadata(path) {
+        m.len().hash(&mut h);
+        if let Ok(t) = m.modified() {
+            if let Ok(d) = t.duration_since(std::time::UNIX_EPOCH) {
+                d.as_secs().hash(&mut h);
+            }
+        }
+    }
+    h.finish()
 }
 
 /// RMS loudness (dBFS) per `window` seconds — a coarse audio map the AI (or

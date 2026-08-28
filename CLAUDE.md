@@ -115,8 +115,14 @@ change. Colors stay named-ANSI so the TUI inherits the Omarchy theme.
 **RULE: interface parity.** CLI, TUI, and MCP ship every capability
 together — the model edits exactly as a human does.
 
-All planned phases (0–7) complete. Next: dogfooding on real footage
-drives the backlog; packaging deferred by Ed's call.
+**Optimization phases (Opt-A/B/C) — done, measured.** Parallel proxies
+(1.6x), single-pass cached audio analysis (repeats 0.01s), scene detect
+on proxies (20x on 4K), VIODE_HWACCEL opt-in + `viode bench` per-machine
+verdicts, segment-overhead measured (~0.12s/cut — smart rendering
+shelved with numbers). Details: PLAN.md optimization section.
+
+All planned phases (0–7 + Opt) complete. Next: dogfooding on real
+footage drives the backlog; packaging deferred by Ed's call.
 
 ## Stack decisions (settled — don't relitigate casually)
 
