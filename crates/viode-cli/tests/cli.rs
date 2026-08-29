@@ -46,6 +46,30 @@ fn make_clip(path: &Path, dur: f64) {
     assert!(status.success(), "ffmpeg could not create {path:?}");
 }
 
+/// Average luma (0-255) of the frame at `at` seconds, via signalstats.
+fn frame_mean_luma(path: &Path, at: f64) -> f64 {
+    let out = Proc::new("ffmpeg")
+        .args([
+            "-loglevel", "info", "-ss", &format!("{at}"),
+        ])
+        .arg("-i")
+        .arg(path)
+        .args([
+            "-frames:v", "1",
+            "-vf", "signalstats,metadata=print",
+            "-f", "null", "-",
+        ])
+        .output()
+        .unwrap();
+    let log = String::from_utf8_lossy(&out.stderr);
+    log.lines()
+        .find_map(|l| l.split("signalstats.YAVG=").nth(1))
+        .expect("no YAVG in ffmpeg output")
+        .trim()
+        .parse()
+        .unwrap()
+}
+
 fn probe_duration(path: &Path) -> f64 {
     let out = Proc::new("ffprobe")
         .args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"])
@@ -506,6 +530,13 @@ fn multitrack_titles_fades_and_effects() {
         viode(&proj).arg("render").assert().success();
         let dur = probe_duration(&proj.join("renders/mt.mp4"));
         assert!((dur - 2.5).abs() < 0.2, "expected ~2.5s, got {dur}s");
+        // The video must show through active titles — GES defaults the
+        // title background to opaque white, which once blanked the frame.
+        let luma = frame_mean_luma(&proj.join("renders/mt.mp4"), 0.5);
+        assert!(
+            luma < 200.0,
+            "frame under title is near-white (YAVG {luma}) — opaque title background?"
+        );
     } else {
         eprintln!("SKIP multitrack render check: GES not installed");
     }
