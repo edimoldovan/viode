@@ -106,7 +106,7 @@ fn handshake_and_tool_listing() {
         }),
     );
     assert_eq!(init["result"]["serverInfo"]["name"], json!("viode"));
-    assert_eq!(init["result"]["protocolVersion"], json!("2025-06-18"));
+    assert_eq!(init["result"]["protocolVersion"], json!("2025-06-18"), "server answers with the version it implements");
 
     let tools = mcp.request("tools/list", json!({}));
     let names: Vec<&str> = tools["result"]["tools"]

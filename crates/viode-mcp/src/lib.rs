@@ -61,14 +61,12 @@ pub fn serve(project_file: Option<PathBuf>) -> anyhow::Result<()> {
 }
 
 fn initialize(params: &Value) -> Value {
-    // Echo the client's protocol version; we have no version-specific
-    // behavior yet.
-    let version = params
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .unwrap_or("2025-06-18");
+    // Negotiate honestly: we answer with the newest protocol we actually
+    // implement. Claiming the client's (possibly newer) version breaks
+    // clients that then expect newer behavior.
+    let _ = params;
     json!({
-        "protocolVersion": version,
+        "protocolVersion": "2025-06-18",
         "capabilities": { "tools": {} },
         "serverInfo": {
             "name": "viode",
