@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "viode": {
-      "command": "/home/ed/dev/linux/viode/target/release/viode",
-      "args": ["serve", "--mcp"]
+      "command": "sh",
+      "args": ["-c", "exec ./target/release/viode serve --mcp"]
     }
   }
 }

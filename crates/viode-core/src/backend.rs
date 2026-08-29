@@ -253,6 +253,11 @@ pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Time
                     .map_err(|e| RenderError::Gst(format!("title add: {e}")))?;
                 t.set_child_property("text", &title.text)
                     .map_err(|e| RenderError::Gst(format!("title text: {e}")))?;
+                // GES defaults the title background to opaque white
+                // (0xFFFFFFFF), which blanks every layer below now that
+                // each title owns a full-frame layer.
+                t.set_child_property("background", &0u32)
+                    .map_err(|e| RenderError::Gst(format!("title background: {e}")))?;
                 if let Some(font) = &title.font {
                     t.set_child_property("font-desc", font)
                         .map_err(|e| RenderError::Gst(format!("title font: {e}")))?;
@@ -399,6 +404,21 @@ impl RenderBackend for GesBackend {
         }
         pipeline.set_state(gst::State::Null)?;
         result
+    }
+}
+
+/// Run `f` under a Cocoa main loop on macOS — GUI video sinks need
+/// NSApplication running on the main thread, so call this from the main
+/// thread before any preview window exists. Everywhere else it is a
+/// plain call.
+pub fn run_gui<T, F: FnOnce() -> T + Send>(f: F) -> T {
+    #[cfg(target_os = "macos")]
+    {
+        gst::macos_main(f)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        f()
     }
 }
 

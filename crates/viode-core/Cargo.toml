@@ -17,3 +17,7 @@ gstreamer-controller.workspace = true
 [dev-dependencies]
 proptest = "1"
 tempfile = "3"
+
+# macOS: gst::macos_main (Cocoa main loop for windowed preview) is behind v1_22.
+[target.'cfg(target_os = "macos")'.dependencies]
+gstreamer = { workspace = true, features = ["v1_22"] }

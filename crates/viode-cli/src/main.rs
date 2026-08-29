@@ -544,7 +544,8 @@ fn run() -> Result<()> {
             let project = Project::load(&cli.project)?;
             let dir = project_dir(&cli.project);
             println!("live preview — close the window or wait for the end");
-            viode_core::preview_play(&project, &dir, Time::parse(&from)?)?;
+            let start = Time::parse(&from)?;
+            viode_core::run_gui(move || viode_core::preview_play(&project, &dir, start))?;
             Ok(())
         }
         Cmd::Queue { cmd } => cmd_queue(&cli.project, cmd),
