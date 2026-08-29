@@ -493,6 +493,13 @@ fn multitrack_titles_fades_and_effects() {
         .failure()
         .stderr(predicate::str::contains("main track"));
 
+    // Overlapping titles must render (stacked end cards) — regression for
+    // the one-layer-per-title fix.
+    viode(&proj)
+        .args(["title", "Second line", "--at", "0.4", "--dur", "1.2", "--y", "0.6"])
+        .assert()
+        .success();
+
     if ges_available() {
         // The composited render (overlay re-enabled) comes out the right length.
         viode(&proj).args(["track", "on", "1"]).assert().success();

@@ -239,8 +239,11 @@ pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Time
         // overlay tracks (later file order on top), main sequence at the
         // bottom.
         if !project.titles.is_empty() {
-            let title_layer = timeline.append_layer();
+            // One layer per title: titles legitimately overlap (stacked
+            // captions, end cards), and GES auto-transition refuses
+            // overlapping clips that share a layer.
             for title in &project.titles {
+                let title_layer = timeline.append_layer();
                 let t = ges::TitleClip::new()
                     .ok_or_else(|| RenderError::Gst("could not create title clip".into()))?;
                 t.set_start(title.at.to_clocktime());
