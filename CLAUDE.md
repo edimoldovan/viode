@@ -186,6 +186,19 @@ assert on the message text: helpful errors are part of the interface.
 
 Coverage check (optional): `cargo install cargo-llvm-cov && cargo llvm-cov --workspace`.
 
+## House rules (from Ed, binding in every session)
+
+- Phases ship whole. Never commit or report a partial phase.
+- CLI, TUI, and MCP stay at feature parity; nothing ships in one only.
+- AI-editing demos run through the real MCP connection — never CLI
+  stand-ins or hand-rolled protocol drivers.
+- Commit messages carry no Co-Authored-By or Generated-with trailers.
+- Write complete sentences everywhere, including docs and commit
+  bodies — no telegram-style fragment piles.
+- Goal framing: beat Premiere. Never conclude that Premiere wins a
+  category; frame gaps as a countdown, and measure before optimizing.
+- Do not run things Ed did not ask for; when he asks how, answer how.
+
 ## Conventions
 
 - **Document as you go**: README.md is the public face — every user-facing

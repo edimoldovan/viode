@@ -33,6 +33,15 @@ displays.
 7. BOTTOM-RIGHT — `omarchy screenrecord --stop-recording`, then
    `omarchy toggle bar`.
 
+## macOS variant
+
+The stage is the same three windows (Claude on the left, two terminals
+on the right — use ghostty for the TUI's filmstrips). Differences: get
+the media first (`scripts/get-test-media.sh`), record with the built-in
+screen recorder (Cmd+Shift+5, select the region) instead of omarchy
+screenrecord, and there is no bar to hide. The finished render lands in
+the same place.
+
 ## Output
 
 Two artifacts: the AI-edited video itself
