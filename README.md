@@ -102,6 +102,24 @@ optimization backlog is measured, not guessed (VA-API proxying tested
 **4.5× slower** than this CPU, so it stays opt-in): see the performance
 section in [PLAN.md](PLAN.md).
 
+### First run on macOS (2026-08-29)
+
+Viode had never run on macOS before this. Test bench: Apple M5 Max,
+128 GB unified memory, macOS 26, Homebrew GStreamer 1.28.6, Rust 1.98.
+
+| What | Result |
+|---|---|
+| `cargo build --release` | clean on the first try (28s) |
+| `cargo test` — the full suite, 69 tests | all green; warm end-to-end run ~3s |
+| GES render, podcast preset, preview pipeline | all work, first try |
+
+One genuine gap: Homebrew's monolithic gstreamer omits the soundtouch
+plugin, so speed changes (`viode speed`) failed to render until we built
+`libgstsoundtouch` from the matching gst-plugins-bad source (~1 minute)
+and dropped it into `~/.local/share/gstreamer-1.0/plugins/`. Everything
+else worked unmodified. Full log and fixes:
+[docs/macos-bootstrap.md](docs/macos-bootstrap.md).
+
 ## Install
 
 Requirements (Arch package names; any distro works with equivalents):
