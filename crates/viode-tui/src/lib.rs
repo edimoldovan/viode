@@ -43,6 +43,9 @@ fn event_loop(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> Result<
     loop {
         app.reap();
         app.media.pump();
+        if !app.is_playing() {
+            app.check_external_change();
+        }
 
         // While mpv paints the pane we keep drawing TEXT. Catch: mpv
         // clears the physical screen, and ratatui renders DIFFS against

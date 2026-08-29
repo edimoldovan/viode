@@ -45,6 +45,7 @@ pub struct App {
     last_play_target: Option<PathBuf>,
     image_refresh: bool,
     confirm_quit: bool,
+    file_mtime: Option<std::time::SystemTime>,
     undo: Vec<Project>,
     redo: Vec<Project>,
     children: Vec<Child>,
@@ -73,6 +74,9 @@ impl App {
             last_play_target: None,
             image_refresh: false,
             confirm_quit: false,
+            file_mtime: std::fs::metadata(project_file)
+                .and_then(|m| m.modified())
+                .ok(),
             undo: Vec::new(),
             redo: Vec::new(),
             children: Vec::new(),
@@ -142,6 +146,33 @@ impl App {
             self.playhead = Time::ZERO;
         } else if self.playhead >= total {
             self.playhead = Time(total.0 - 1); // keep it on the last frame
+        }
+    }
+
+    /// Live-reload: when ANOTHER process (the MCP server, the CLI, an
+    /// editor) rewrites the project file, pick it up — unless there are
+    /// unsaved local edits, which are never clobbered silently.
+    pub fn check_external_change(&mut self) {
+        let Ok(mtime) = std::fs::metadata(&self.project_file).and_then(|m| m.modified()) else {
+            return;
+        };
+        if Some(mtime) == self.file_mtime {
+            return;
+        }
+        self.file_mtime = Some(mtime);
+        if self.dirty {
+            self.message = "project changed on disk — you have unsaved edits (w overwrites)".into();
+            return;
+        }
+        match Project::load(&self.project_file) {
+            Ok(project) => {
+                self.project = project;
+                self.undo.clear();
+                self.redo.clear();
+                self.clamp_playhead();
+                self.message = "reloaded — project changed on disk".into();
+            }
+            Err(e) => self.message = format!("changed on disk but unreadable: {e}"),
         }
     }
 
@@ -228,6 +259,9 @@ impl App {
         match self.project.save(&self.project_file) {
             Ok(()) => {
                 self.dirty = false;
+                self.file_mtime = std::fs::metadata(&self.project_file)
+                    .and_then(|m| m.modified())
+                    .ok();
                 self.message = format!("saved {}", self.project_file.display());
             }
             Err(e) => self.message = format!("save failed: {e}"),
@@ -627,6 +661,32 @@ mod tests {
         assert!(!a.dirty);
         let reloaded = Project::load(&a.project_file).unwrap();
         assert_eq!(reloaded.main().clips.len(), 3);
+    }
+
+    #[test]
+    fn external_changes_reload_unless_dirty() {
+        let mut a = app();
+        // Another process rewrites the file (MCP server, CLI, editor).
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut other = Project::load(&a.project_file).unwrap();
+        other.main_mut().clips.truncate(1);
+        other.save(&a.project_file).unwrap();
+
+        a.check_external_change();
+        assert_eq!(a.project.main().clips.len(), 1, "reloaded external edit");
+        assert!(a.message.contains("reloaded"));
+
+        // With unsaved local edits, never clobber silently.
+        let mut a2 = App::open(&a.project_file).unwrap();
+        a2.playhead = t(0.5);
+        a2.on_key(KeyCode::Char('s')); // dirty now
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut other = Project::load(&a2.project_file).unwrap();
+        other.main_mut().clips.clear();
+        other.save(&a2.project_file).unwrap();
+        a2.check_external_change();
+        assert!(!a2.project.main().clips.is_empty(), "local edits kept");
+        assert!(a2.message.contains("unsaved"));
     }
 
     #[test]
