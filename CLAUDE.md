@@ -121,8 +121,15 @@ on proxies (20x on 4K), VIODE_HWACCEL opt-in + `viode bench` per-machine
 verdicts, segment-overhead measured (~0.12s/cut — smart rendering
 shelved with numbers). Details: PLAN.md optimization section.
 
-All planned phases (0–7 + Opt) complete. Next: dogfooding on real
-footage drives the backlog; packaging deferred by Ed's call.
+All planned phases (0–7 + Opt) complete. **Next: Phase 8 G1 — the GUI
+viewer** (see PLAN.md): egui window with the live GES preview and the
+full timeline display. Ed's verdict on the TUI-based showcase: not
+presentable to a general audience; the GUI is the shareable face.
+Showcase footage lesson: the benchmark media (SD public-domain films)
+is deliberately ugly for demos — use ONE Blender Studio film (Spring /
+Sprite Fright / Charge, 4K CC) for anything meant to be seen, and add
+a background bar behind titles before the next showcase render.
+Packaging still deferred by Ed's call.
 
 ## Stack decisions (settled — don't relitigate casually)
 
