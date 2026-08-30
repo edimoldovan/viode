@@ -47,10 +47,12 @@ smoothing, ProRes/DNxHR/HEVC/AV1 exports with a render queue, and media
 relinking. What remains is depth and dogfooding — and the table above is
 the part they can't copy back.
 
-![Viode editing a timeline: filmstrips, waveforms, playhead, and live playback](docs/screenshot.png)
+![Viode editing a timeline in a TUI: filmstrips, waveforms, playhead, and live playback](docs/tui.png)
+
+![Viode editing a timeline, this time in a GUI: filmstrips, waveforms, playhead, and live playback](docs/gui.png)
 
 *Filmstrips, waveforms, a playhead — and live video playback of the edit,
-with zero rendering in between.*
+with zero rendering in between  — both in a TUI and a GUI.*
 
 ## Why
 
