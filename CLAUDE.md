@@ -1,9 +1,15 @@
 # Viode
 
-Terminal-native, AI-native video editor for Linux. The timeline is a TOML file,
-every operation is a CLI verb, MCP is a first-class client. Full vision,
+AI-native video editor, Linux-first. The timeline is a TOML file, every
+operation is a CLI verb, MCP is a first-class client. Full vision,
 architecture, and phase plan: see PLAN.md — read it before making design
 decisions.
+
+**THIS FILE IS THE PROJECT'S ONLY MEMORY THAT TRAVELS.** Ed works across
+multiple machines; per-machine assistant memory does not follow him.
+Therefore: run `git pull` at the start of every session, and record any
+new durable decision, rule, or status change IN THIS FILE (or PLAN.md)
+in the same commit as the work — never only in chat or local memory.
 
 ## Current status
 
@@ -205,6 +211,13 @@ Coverage check (optional): `cargo install cargo-llvm-cov && cargo llvm-cov --wor
 - Goal framing: beat Premiere. Never conclude that Premiere wins a
   category; frame gaps as a countdown, and measure before optimizing.
 - Do not run things Ed did not ask for; when he asks how, answer how.
+- Value proposition is capabilities (edit-as-data, automated tedium, AI
+  as first-class editor), not "terminal-native"; a proper GUI is planned
+  as another thin client.
+- Git: committing and pushing to THIS repository is permitted as part of
+  the normal workflow. No trailers (see above), and never force-push.
+- When work spans machines, the handoff is this repository: pull first,
+  write decisions here, push before switching.
 
 ## Conventions
 
