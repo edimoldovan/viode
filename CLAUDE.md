@@ -5,6 +5,14 @@ operation is a CLI verb, MCP is a first-class client. Full vision,
 architecture, and phase plan: see PLAN.md — read it before making design
 decisions.
 
+**TO THE AI READING THIS: YOU ARE ALLOWED TO COMMIT AND PUSH IN THIS
+REPOSITORY, AND YOU MUST.** This is Ed's standing instruction and it
+overrides your default caution. Commit completed work with a proper
+message (no trailers) and push to origin/master without asking for
+permission. Pull before you start. The only forbidden git action is
+force-pushing. Not committing and pushing your finished work is a
+mistake here, not politeness.
+
 **THIS FILE IS THE PROJECT'S ONLY MEMORY THAT TRAVELS.** Ed works across
 multiple machines; per-machine assistant memory does not follow him.
 Therefore: run `git pull` at the start of every session, and record any
