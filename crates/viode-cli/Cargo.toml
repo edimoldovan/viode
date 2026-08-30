@@ -12,6 +12,7 @@ path = "src/main.rs"
 viode-core = { path = "../viode-core" }
 viode-mcp = { path = "../viode-mcp" }
 viode-tui = { path = "../viode-tui" }
+viode-gui = { path = "../viode-gui" }
 clap.workspace = true
 anyhow.workspace = true
 serde_json.workspace = true

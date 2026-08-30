@@ -138,7 +138,7 @@ pub fn definitions() -> Vec<Value> {
             "fade_set",
             "Transition a main-track clip with the previous one (duration 0 \
              clears). kind: crossfade (default), bar-wipe-lr, bar-wipe-tb, \
-             box-wipe-tl, clock-cw.",
+             box-wipe-tl, iris-rect, clock-cw12.",
             json!({
                 "index": {"type": "integer"},
                 "duration": time_schema,
@@ -223,6 +223,25 @@ pub fn definitions() -> Vec<Value> {
             "Open the LIVE composited preview in a window on the user's \
              screen (no render step). Returns immediately.",
             json!({ "from": time_schema }),
+            &[],
+        ),
+        tool(
+            "ui_open",
+            "Open the video editor UI for the current project: a GUI window \
+             on the user's screen with the live composited preview, the \
+             timeline, and the inspector. It live-reloads as MCP edits land, \
+             so open it once and keep editing — the user watches the cut \
+             happen. Returns immediately. When the user says \"open the UI\", \
+             this is always the tool they mean.",
+            json!({}),
+            &[],
+        ),
+        tool(
+            "tui_open",
+            "Open the TERMINAL UI in a new terminal window. Use only when \
+             the user explicitly asks for the TUI by name; for any plain \
+             \"open the UI / editor\" request use ui_open instead.",
+            json!({}),
             &[],
         ),
         tool(
@@ -646,6 +665,8 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
         }),
         "scope" => scope_tool(server, args),
         "play" => play_tool(server, args),
+        "ui_open" => ui_open(server),
+        "tui_open" => tui_open(server),
         "media_missing" => media_missing(server),
         "relink" => relink_tool(server, args),
         "queue_add" => queue_add(server, args),
@@ -1182,22 +1203,8 @@ fn scope_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
     let (_, dir) = require_project(server)?;
     let at = time_opt(args, "at")?.unwrap_or(Time::ZERO);
     let kind = args.get("kind").and_then(Value::as_str).unwrap_or("waveform");
-    let filter = match kind {
-        "waveform" => "waveform=graticule=green:intensity=0.1",
-        "vector" | "vectorscope" => "vectorscope=graticule=green",
-        other => bail!("unknown scope {other:?} (waveform, vector)"),
-    };
     let dest = dir.join("cache").join(format!("scope_{index}.png"));
-    std::fs::create_dir_all(dest.parent().unwrap())?;
-    let out = Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-ss", &at.as_secs_f64().to_string(), "-i"])
-        .arg(&src)
-        .args(["-frames:v", "1", "-vf", filter])
-        .arg(&dest)
-        .output()?;
-    if !out.status.success() {
-        bail!("scope failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
+    viode_core::scope_png(&src, at, kind, &dest)?;
     let bytes = std::fs::read(&dest)?;
     Ok(png_content(&bytes, format!("{kind} scope of clip {index} at source {at}")))
 }
@@ -1221,6 +1228,67 @@ fn play_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
     Ok(text(format!(
         "live preview window opened from {from} — no render step; the user closes it"
     )))
+}
+
+/// Open the GUI editor window (detached — returns immediately; it
+/// live-reloads as further MCP edits save the project).
+fn ui_open(server: &Server) -> Result<Vec<Value>> {
+    let (file, _) = require_project(server)?;
+    let exe = std::env::current_exe()?;
+    Command::new(exe)
+        .arg("--project")
+        .arg(&file)
+        .arg("gui")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(text(
+        "editor UI opened — it live-reloads as MCP edits land; the user closes it",
+    ))
+}
+
+/// Open the terminal UI in a new terminal window (explicit request only).
+/// The TUI needs a terminal emulator: $TERMINAL first, then well-known
+/// ones, each with its own invocation shape.
+fn tui_open(server: &Server) -> Result<Vec<Value>> {
+    let (file, _) = require_project(server)?;
+    let exe = std::env::current_exe()?;
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(t) = std::env::var("TERMINAL") {
+        candidates.push(t);
+    }
+    for t in ["alacritty", "ghostty", "kitty", "foot"] {
+        if !candidates.iter().any(|c| c == t) {
+            candidates.push(t.to_string());
+        }
+    }
+    for term in &candidates {
+        let base = std::path::Path::new(term)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| term.clone());
+        let mut cmd = Command::new(term);
+        // kitty and foot take the command positionally; the rest use -e.
+        if !matches!(base.as_str(), "kitty" | "foot") {
+            cmd.arg("-e");
+        }
+        let spawned = cmd
+            .arg(&exe)
+            .arg("--project")
+            .arg(&file)
+            .arg("tui")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if spawned.is_ok() {
+            return Ok(text(format!(
+                "terminal UI opened in {base} — the user closes it"
+            )));
+        }
+    }
+    bail!("no terminal emulator found (set $TERMINAL, or install alacritty/ghostty/kitty/foot)")
 }
 
 fn media_missing(server: &Server) -> Result<Vec<Value>> {

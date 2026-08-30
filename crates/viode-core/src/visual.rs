@@ -85,3 +85,38 @@ pub fn contact_sheet_png(
     )?;
     Ok(rows)
 }
+
+/// Snapshot a video scope of the frame at `at`: "waveform" (luma levels)
+/// or "vector"/"vectorscope" (chroma distribution) — the QC senses every
+/// client shares (CLI `viode scope`, MCP `scope`, the GUI overlay).
+pub fn scope_png(
+    src: &Path,
+    at: Time,
+    kind: &str,
+    dest: &Path,
+) -> Result<(), VisualError> {
+    let filter = match kind {
+        "waveform" => "waveform=graticule=green:intensity=0.1",
+        "vector" | "vectorscope" => "vectorscope=graticule=green",
+        other => {
+            return Err(VisualError::Ffmpeg(
+                src.display().to_string(),
+                format!("unknown scope {other:?} (waveform, vector)"),
+            ))
+        }
+    };
+    run(
+        src,
+        dest,
+        vec![
+            "-ss".into(),
+            at.as_secs_f64().to_string(),
+            "-i".into(),
+            src.display().to_string(),
+            "-frames:v".into(),
+            "1".into(),
+            "-vf".into(),
+            filter.into(),
+        ],
+    )
+}

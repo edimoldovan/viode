@@ -127,15 +127,80 @@ on proxies (20x on 4K), VIODE_HWACCEL opt-in + `viode bench` per-machine
 verdicts, segment-overhead measured (~0.12s/cut — smart rendering
 shelved with numbers). Details: PLAN.md optimization section.
 
-All planned phases (0–7 + Opt) complete. **Next: Phase 8 G1 — the GUI
-viewer** (see PLAN.md): egui window with the live GES preview and the
-full timeline display. Ed's verdict on the TUI-based showcase: not
-presentable to a general audience; the GUI is the shareable face.
-Showcase footage lesson: the benchmark media (SD public-domain films)
-is deliberately ugly for demos — use ONE Blender Studio film (Spring /
-Sprite Fright / Charge, 4K CC) for anything meant to be seen, and add
-a background bar behind titles before the next showcase render.
-Packaging still deferred by Ed's call.
+**Phase 8 G1 (the GUI viewer) — done.** `viode gui` (crates/viode-gui,
+eframe/egui 0.32) opens the project in a native window: LIVE composited
+GES preview (shared `build_timeline` -> RGBA appsink -> egui texture,
+capped at 720p for 4K projects), full timeline display (lanes for every
+track, filmstrips + waveforms from the shared artifact cache, title
+markers, adaptive ruler, playhead), transport grammar (space, JKL
+shuttle to ±8x, arrows, ,/. frame-step, home/end, click/drag scrub, ?
+help, q quit). Structured like the TUI: `state.rs` is a pure tested
+reducer emitting player commands, `ui.rs` stays dumb, `player.rs` is
+headless-testable (the integration test drives preroll/seek/rate/EOS
+with no window; VIODE_PREVIEW_SINK=fake swaps the audio sink).
+Live-reload: the GUI polls the project mtime like the TUI and rebuilds
+the preview in place — a running `viode gui` is a live monitor of an
+MCP edit session, per Ed. `MediaCache` moved to
+`viode_core::artifacts` (same cache/tui dir) so TUI and GUI share
+artifacts; viode-tui/src/media.rs re-exports it. Layout follows the
+NLE convention per Ed (Premiere reference): preview dominates, docked
+timeline with a prominent accent timecode, V1/A1 track headers, video
+overlay lanes above V1 and audio below A1. Colors come from the
+Omarchy theme (`theme.rs` parses
+~/.local/state/omarchy/current/theme/alacritty.toml, neutral dark
+fallback) — never hardcode GUI colors, derive them from that palette.
+
+**Phase 8 G2 (GUI editing parity) — done.** `edit.rs` is the tested
+edit reducer (37 unit tests): playhead verbs with TUI semantics
+(s/i/o/d, </>, u/U undo/redo, w save, t title, q with dirty-confirm —
+also honored by the window close button), inspector setters mirroring
+CLI validation and neutral-value normalization (speed, gain, pan,
+place, color grade, fades + wipe kinds, keyframes, full title
+editing), and a restore-orig drag engine: every mouse motion re-applies
+the TOTAL delta to a copy of the drag-start project, so impossible
+trims hold the last good state. Mouse grammar: click selects (the
+inspector edits the selection), body-drag moves (main reorders by
+midpoint crossing, overlays shift `at`), edge-drag trims (overlay
+TrimIn keeps the right edge anchored), alt+edge = roll, alt+body =
+slip, shift+alt = slide — ops::roll/slip/slide reused, boundary index
+= right-hand clip. Scrubbing moved to the ruler. Edits rebuild the
+preview pipeline debounced 300ms; slider gestures are ONE undo step
+(staged snapshots, ended when the pointer releases). External reloads
+never clobber unsaved local edits (TUI contract). MCP grew `ui_open`
+(open the GUI, detached, live-reloading — "open the UI" always means
+the GUI) and `tui_open` (spawns $TERMINAL/alacritty/ghostty/kitty/foot;
+explicit TUI requests only), per Ed's chat-first workflow.
+
+**Phase 8 G3 (the pro surface) — done.** Left panel + dialogs, all
+wrapping existing core verbs (no new capabilities — parity intact):
+angle list with thumbnails (click = take over the range marked with
+`[`/`]`, or the clip under the playhead; Editor::take mirrors CLI
+validation), transcript panel (whisper on a worker thread into the
+CLI's cache/transcript_N.json; click a sentence to seek, ✕ to cut via
+remove_source_ranges with the CLI's 50ms pad), scopes toggle
+(waveform + vectorscope via core scope_png — now lifted into
+viode_core::visual and shared by CLI/MCP/GUI — overlaid on the paused
+preview), render dialog on `r` (master/preset/custom-codec, background
+render thread, shared cache/queue.toml add/run/clear), and a
+missing-media banner with a relink-by-filename dialog. Fixed en route:
+a Phase 5 core bug — ops::replace_range DROPPED clips entirely after
+the replaced range on multi-clip timelines (single-clip mains masked
+it); now fixed with a proptest (total duration invariant). Also fixed:
+GUI freezes ("Application Not Responding") — the GES pipeline is
+!Send and was being built on the UI thread; player.rs is now an actor
+thread owning the pipeline for its whole life, and eframe runs with
+vsync OFF because Wayland compositors withhold frame callbacks from
+hidden windows, which deadlocked the buffer swap on timed repaints.
+**Next: Phase 8 G4 — macOS** (plan: docs/macos-g4.md). Ed runs it on
+his own Mac and drives the fixes from there.
+
+Ed's verdict on the TUI-based showcase: not presentable to a general
+audience; the GUI is the shareable face. Showcase footage lesson: the
+benchmark media (SD public-domain films) is deliberately ugly for
+demos — use ONE Blender Studio film (Spring / Sprite Fright / Charge,
+4K CC) for anything meant to be seen, and add a background bar behind
+titles before the next showcase render. Packaging still deferred by
+Ed's call.
 
 ## Stack decisions (settled — don't relitigate casually)
 

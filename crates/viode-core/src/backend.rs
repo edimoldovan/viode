@@ -209,6 +209,20 @@ fn add_media_clip(
     Ok(())
 }
 
+/// Transition kinds Viode advertises across every interface (CLI docs,
+/// MCP schema, GUI dropdown, error hints). Any GES
+/// VideoStandardTransitionType nick works in the project file; these are
+/// the curated ones — and a unit test proves each really exists in
+/// GStreamer, so the list can never drift from the engine again.
+pub const TRANSITION_KINDS: &[&str] = &[
+    "crossfade",
+    "bar-wipe-lr",
+    "bar-wipe-tb",
+    "box-wipe-tl",
+    "iris-rect",
+    "clock-cw12",
+];
+
 /// Build the full GES timeline for a project — shared by the renderer and
 /// the live preview.
 pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Timeline, RenderError> {
@@ -326,7 +340,8 @@ pub fn build_timeline(project: &Project, project_dir: &Path) -> Result<ges::Time
                     .ok_or_else(|| RenderError::Gst("no transition enum".into()))?;
             let value = enum_class.value_by_nick(kind).ok_or_else(|| {
                 RenderError::Gst(format!(
-                    "unknown transition {kind:?} (try crossfade, bar-wipe-lr,                      bar-wipe-tb, box-wipe-tl, clock-cw)"
+                    "unknown transition {kind:?} (try {})",
+                    TRANSITION_KINDS.join(", ")
                 ))
             })?;
             for tclip in layer.clips() {
@@ -580,4 +595,30 @@ fn run_ffmpeg(args: &[String]) -> Result<(), RenderError> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every transition kind Viode advertises must be a real GES nick —
+    /// this is the regression net for the "clock-cw" bug, where a wrong
+    /// name in the suggestion list became a clickable way to break the
+    /// preview once the GUI turned suggestions into a dropdown.
+    #[test]
+    fn advertised_transition_kinds_exist_in_ges() {
+        if ges::init().is_err() {
+            eprintln!("SKIP advertised_transition_kinds_exist_in_ges: GES not available");
+            return;
+        }
+        let enum_class =
+            gst::glib::EnumClass::with_type(ges::VideoStandardTransitionType::static_type())
+                .expect("transition enum");
+        for kind in TRANSITION_KINDS {
+            assert!(
+                enum_class.value_by_nick(kind).is_some(),
+                "{kind:?} is not a GES transition nick"
+            );
+        }
+    }
 }

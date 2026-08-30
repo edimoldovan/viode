@@ -182,6 +182,52 @@ and therefore aether/Omarchy — is running.
 | `r` | render the master |
 | `w` / `q` / `?` | save / quit (confirms if unsaved) / help |
 
+## The GUI viewer
+
+`viode gui` opens the project in a native window (egui) laid out like an
+NLE: the preview dominates, and the timeline docks below it with a
+prominent timecode, track headers on the left (V1/A1 style; video lanes
+stack above V1, audio lanes below A1), real filmstrips and waveforms, and
+titles as markers. Colors follow the Omarchy theme — the GUI reads the
+same terminal palette the TUI inherits, so it matches your desktop (and
+falls back to a neutral dark theme elsewhere). The preview is the
+same GES timeline the renderer uses, streamed frame-by-frame into the
+window, so transitions, titles, transforms, and keyframes all play exactly
+as they will render. Transport follows the editor grammar: `space`
+play/pause, `J`/`K`/`L` shuttle (up to 8x, both directions), `←`/`→` seek,
+`,`/`.` frame-step, `home`/`end` jump, and clicking or dragging on the
+timeline scrubs. 4K projects preview at 720p automatically; sources stay
+untouched.
+
+The GUI edits with full parity (G2): click a clip to select it, drag it
+to move (main-track clips reorder, overlays reposition), drag its edges
+to trim, `alt`+drag an edge to roll the cut, `alt`+drag the body to
+slip, `shift+alt`+drag to slide. The keyboard grammar carries over from
+the TUI: `s` split, `i`/`o` trim to playhead, `d` delete, `<`/`>` move,
+`t` title, `u`/`U` undo/redo, `w` save (quit asks about unsaved edits).
+An inspector panel edits every clip property from Phases 5-7 — speed,
+gain, pan, fades and wipes, position/scale/rotate/opacity, color grade,
+keyframes — plus full title editing. Edits rebuild the live preview in
+place, debounced, with single undo steps per slider gesture.
+
+The viewer also live-reloads: when any other process rewrites the
+project file — the CLI, an editor, or an AI session over MCP — the
+timeline redraws and the preview rebuilds in place (unsaved local edits
+are never clobbered). Ask Claude to *"open the UI"* over MCP
+(`ui_open`) and watch the edit happen.
+
+The pro surface (G3) lives in the left panel. Angles: every non-main
+track appears with a thumbnail — mark a range (`[` and `]`, shown on
+the ruler) and click an angle to take that range from it, the multicam
+cut as one click. Transcript: transcribe the clip under the playhead
+(whisper.cpp), then click a sentence to jump to it or ✕ to cut it out
+of the video. Scopes: a toggle overlays waveform + vectorscope QC
+images on the paused preview frame. The render dialog (`r`) does
+masters, YouTube/Shorts/podcast presets and custom codecs, renders in
+the background, and manages the shared render queue. Missing media
+raises a relink banner — point it at a directory and clips reconnect
+by filename.
+
 ## CLI reference
 
 ```
@@ -228,6 +274,7 @@ viode proxy [--force]                           build 540p proxies for all media
 viode render [--preset P] [--codec C]           presets or h264/hevc/av1/prores/dnxhr
              [--bitrate kbps] [--smooth fps]    bitrate targeting, optical-flow slow-mo
 viode tui                                       terminal UI
+viode gui                                       GUI viewer: live preview + timeline
 viode serve --mcp                               MCP server on stdio
 ```
 
@@ -323,22 +370,26 @@ CLI verb as a tool, plus senses:
 - `render_preview` — fast sub-range render for checking a section
 - the full edit surface: tracks, effects, fades, titles, multicam
   (`angle_add` / `take`), and transcripts (`transcribe` / `text_cut`)
+- `ui_open` — opens the GUI on the user's screen; it live-reloads on
+  every MCP edit, so the user watches the AI cut in real time ("open the
+  UI" always means the GUI; `tui_open` exists for explicit TUI requests)
 
-A realistic prompt: *"Open the project, cut the silences out of clip 0,
-show me the frame at each remaining cut, and render a shorts version."*
+A realistic prompt: *"Create a project from the clips in ~/footage, open
+the UI, cut the silences out of clip 0, and render a shorts version"* —
+and the edit assembles itself in the window while the model works.
 
 ## Architecture
 
 ```
    viode CLI ───►┌────────────┐
    viode tui ───►│ viode-core │──► GES/GStreamer (frame-accurate render)
- MCP (Claude)───►│  (library) │──► ffmpeg sidecar (probe, proxies, analysis,
-                 └────────────┘     smart-copy, presets)
+   viode gui ───►│  (library) │──► ffmpeg sidecar (probe, proxies, analysis,
+ MCP (Claude)───►└────────────┘     smart-copy, presets)
 ```
 
 - **viode-core** — timeline model, TOML persistence, pure edit operations,
-  analysis, render backends. Every client goes through it; the GUI (when it
-  comes) will be just another client.
+  analysis, render backends. Every client goes through it; the GUI is just
+  another client and adds zero capabilities the CLI lacks.
 - **GStreamer Editing Services** renders; **ffmpeg** does everything around
   the timeline. The engine sits behind a trait and is swappable.
 - Proxies (540p) are built once and used automatically by playback,
@@ -356,12 +407,12 @@ show me the frame at each remaining cut, and render a shorts version."*
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
 | 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
 | 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth, live preview | ✅ |
-| 8 | The GUI: native multiplatform client (egui), live preview, drag editing | ⏳ |
+| 8 | The GUI (egui) — G1 viewer ✅, G2 editing parity ✅, G3 pro surface (multicam takes, transcript editing, scopes, render dialog, relink) ✅, next: G4 macOS | ⏳ |
 
 ## Development
 
 ```bash
-cargo build && cargo test          # 54 tests: unit, property-based, end-to-end
+cargo build && cargo test          # 114 tests: unit, property-based, end-to-end
 ./scripts/bench-longform.sh 10     # long-form performance check
 ```
 

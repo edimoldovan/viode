@@ -250,26 +250,36 @@ pub fn replace_range(
     for (i, old) in track.clips.iter().enumerate() {
         let c_start = positions[i];
         let c_end = c_start + old.len();
-        // Piece before the range.
-        if c_start < start && start < c_end {
-            let mut head = old.clone();
-            head.out = old.in_ + old.src_offset(start - c_start);
-            result.push(head);
-        } else if c_end <= start {
+        // Entirely before the range: kept as-is.
+        if c_end <= start {
             result.push(old.clone());
             continue;
         }
+        // Straddles the range start: keep the head.
+        if c_start < start {
+            let mut head = old.clone();
+            head.out = old.in_ + old.src_offset(start - c_start);
+            result.push(head);
+        }
+        // The take lands at the first clip that reaches past the start.
         if !inserted {
             result.push(clip.clone());
             inserted = true;
         }
-        // Piece after the range.
-        if c_start < end && end < c_end {
+        // Entirely after the range: kept as-is (this was the multi-clip
+        // take bug — these used to be dropped).
+        if c_start >= end {
+            result.push(old.clone());
+            continue;
+        }
+        // Straddles the range end: keep the tail.
+        if end < c_end {
             let mut tail = old.clone();
             tail.in_ = old.in_ + old.src_offset(end - c_start);
             tail.transition = None;
             result.push(tail);
         }
+        // Entirely inside the range: replaced, nothing kept.
     }
     if !inserted {
         result.push(clip);
@@ -687,6 +697,43 @@ mod prop_tests {
                 prop_assert!(c.in_ < c.out);
             }
             prop_assert_eq!(p.main().clips[0].out, p.main().clips[1].in_);
+        }
+
+        /// A take (replace_range) over ANY valid range of ANY multi-clip
+        /// sequence preserves the total duration and every clip stays
+        /// well-formed. (Regression net for the multi-clip take bug: clips
+        /// after the range used to be dropped.)
+        #[test]
+        fn replace_range_preserves_total_duration(
+            lens_ms in proptest::collection::vec(500u64..5_000, 1..6),
+            start_frac in 0.0f64..0.999,
+            len_frac in 0.001f64..1.0,
+        ) {
+            let mut track = Track::new("main", TrackKind::Av);
+            for l in &lens_ms {
+                track.clips.push(Clip::media(
+                    "x.mp4".into(),
+                    Time::ZERO,
+                    Time(l * 1_000_000),
+                ));
+            }
+            let mut p = Project::new("prop", 30.0, [640, 360]);
+            p.tracks[0] = track;
+
+            let total = p.total_duration();
+            let start = Time(((total.0 as f64 * start_frac) as u64 / 1_000_000) * 1_000_000);
+            let max_len = total.0 - start.0;
+            let len = Time((((max_len as f64 * len_frac) as u64 / 1_000_000) * 1_000_000).max(1_000_000).min(max_len));
+            prop_assume!(len.0 >= 1_000_000);
+            let end = start + len;
+
+            let take = Clip::media("angle.mp4".into(), Time::ZERO, len);
+            replace_range(p.main_mut(), start, end, take).unwrap();
+
+            prop_assert_eq!(p.total_duration(), total);
+            for c in &p.main().clips {
+                prop_assert!(c.in_ < c.out);
+            }
         }
     }
 }

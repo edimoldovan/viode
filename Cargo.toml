@@ -5,6 +5,7 @@ members = [
     "crates/viode-cli",
     "crates/viode-mcp",
     "crates/viode-tui",
+    "crates/viode-gui",
 ]
 
 [workspace.package]
@@ -25,3 +26,5 @@ gstreamer = "0.24"
 gstreamer-editing-services = "0.24"
 gstreamer-pbutils = "0.24"
 gstreamer-controller = "0.24"
+gstreamer-app = "0.24"
+gstreamer-video = "0.24"

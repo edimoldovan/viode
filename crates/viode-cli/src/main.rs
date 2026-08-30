@@ -73,7 +73,7 @@ enum Cmd {
     Fade {
         index: usize,
         duration: String,
-        /// crossfade (default), bar-wipe-lr, bar-wipe-tb, box-wipe-tl, clock-cw
+        /// crossfade (default), bar-wipe-lr, bar-wipe-tb, box-wipe-tl, iris-rect, clock-cw12
         #[arg(long)]
         kind: Option<String>,
     },
@@ -336,6 +336,8 @@ enum Cmd {
     },
     /// Open the timeline in the terminal UI
     Tui,
+    /// Open the timeline in the GUI viewer (live preview + timeline)
+    Gui,
     /// Run the MCP server (stdio) — lets AI clients edit the project
     Serve {
         #[arg(long)]
@@ -510,7 +512,7 @@ fn run() -> Result<()> {
             let src = clip_source(&cli.project, &project, index)?;
             let dir = project_dir(&cli.project);
             let dest = dir.join("cache").join(format!("scope_{index}.png"));
-            scope_png(&src, &Time::parse(&at)?, &kind, &dest)?;
+            viode_core::scope_png(&src, Time::parse(&at)?, &kind, &dest)?;
             println!("{}", dest.display());
             Ok(())
         }
@@ -713,6 +715,7 @@ fn run() -> Result<()> {
             Ok(())
         }),
         Cmd::Tui => viode_tui::run(&cli.project),
+        Cmd::Gui => viode_core::run_gui(|| viode_gui::run(&cli.project)),
         Cmd::Serve { mcp } => {
             if !mcp {
                 bail!("only --mcp is supported for now (viode serve --mcp)");
@@ -1034,10 +1037,6 @@ fn clip_source(project_file: &Path, project: &Project, index: usize) -> Result<P
     Ok(project_dir(project_file).join(&clip.src))
 }
 
-fn clip_source_owned(project_file: &Path, project: &Project, index: usize) -> Result<PathBuf> {
-    clip_source(project_file, project, index)
-}
-
 /// O3: video ANALYSIS runs on the 540p proxy when one exists — scene
 /// scores don't need 4K pixels. Audio analysis stays on originals.
 fn analysis_source(project_file: &Path, project: &Project, index: usize) -> Result<PathBuf> {
@@ -1164,27 +1163,6 @@ fn cmd_ls(project_file: &Path) -> Result<()> {
 }
 
 /// ffmpeg waveform/vectorscope of one frame — the colorist's instruments.
-fn scope_png(src: &Path, at: &Time, kind: &str, dest: &Path) -> Result<()> {
-    let filter = match kind {
-        "waveform" => "waveform=graticule=green:intensity=0.1",
-        "vector" | "vectorscope" => "vectorscope=graticule=green",
-        other => bail!("unknown scope {other:?} (waveform, vector)"),
-    };
-    if let Some(d) = dest.parent() {
-        fs::create_dir_all(d)?;
-    }
-    let out = std::process::Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-ss", &at.as_secs_f64().to_string(), "-i"])
-        .arg(src)
-        .args(["-frames:v", "1", "-vf", filter])
-        .arg(dest)
-        .output()?;
-    if !out.status.success() {
-        bail!("ffmpeg scope failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-    }
-    Ok(())
-}
-
 use viode_core::queue::{self as rqueue, QueueJob, RenderQueue};
 
 fn load_queue(project_file: &Path) -> Result<RenderQueue> {
