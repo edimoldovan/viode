@@ -199,18 +199,18 @@ GUI freezes ("Application Not Responding") — the GES pipeline is
 thread owning the pipeline for its whole life, and eframe runs with
 vsync OFF because Wayland compositors withhold frame callbacks from
 hidden windows, which deadlocked the buffer swap on timed repaints.
-**Phase 8 G4 — macOS (in progress, on Ed's Mac).** Plan and findings:
-docs/macos-g4.md. Landed so far: the `gui` verb runs eframe directly
-(never through `run_gui`/`gst::macos_main` — winit must own the Cocoa
-main loop; `viode play` keeps the wrapper), `tui_open` falls back to
-`open -a Terminal` with a generated `.command` script, and
+**Phase 8 G4 — macOS: done (2026-08-31, Ed's verdict on his Mac).**
+Plan and findings: docs/macos-g4.md. The `gui` verb runs eframe
+directly (never through `run_gui`/`gst::macos_main` — winit must own
+the Cocoa main loop; `viode play` keeps the wrapper), `tui_open` falls
+back to `open -a Terminal` with a generated `.command` script, and
 `VIODE_HWACCEL` is per-platform via `viode-core/src/hwaccel.rs`
 (VA-API on Linux, VideoToolbox on macOS — one definition shared by
 proxies, GES renders, and both bench verbs). Measured on the M5 Max:
 software beats VideoToolbox 4.0x for 540p proxying, so the env var
-stays unset there. Still open before G4 is done: Ed exercising the
-full GUI surface with eyes on the window, and packaging (deliberately
-last).
+stays unset there. Ed exercised the GUI surface on the Mac and called
+it done. Phase 8 is complete on both platforms; packaging remains
+deferred by Ed's call and is the only G4 leftover.
 
 Ed's verdict on the TUI-based showcase: not presentable to a general
 audience; the GUI is the shareable face. Showcase footage lesson: the
