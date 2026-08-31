@@ -218,7 +218,8 @@ Windows is PARKED until Ed starts a VM on Omarchy — do not begin
 Windows work before then. The Linux + macOS plan is in PLAN.md Phase 9:
 D1 release spine (CI on both OSes + tagged v0.1.0 release), D2 package
 managers (AUR + Homebrew tap), D3 native bundles (.deb/.rpm; notarized
-.app gated on an Apple Developer account, Ed's call). This supersedes
+.app — Ed already has an Apple Developer account, so nothing external
+blocks it; signing secrets go into GitHub Actions, never the repo). This supersedes
 "packaging deferred" above.
 
 Ed's verdict on the TUI-based showcase: not presentable to a general
