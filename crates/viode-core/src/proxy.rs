@@ -47,22 +47,15 @@ pub fn build_proxy(
 
     // Opt-B: hardware path is OPT-IN because it is machine-dependent —
     // `viode bench` measures which path wins on this box.
-    let hw = std::env::var("VIODE_HWACCEL").ok().filter(|v| v == "vaapi");
+    let hw = crate::hwaccel::from_env();
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-loglevel", "error"]);
-    if hw.is_some() {
-        cmd.args([
-            "-hwaccel", "vaapi",
-            "-hwaccel_device", "/dev/dri/renderD128",
-            "-hwaccel_output_format", "vaapi",
-        ]);
+    if let Some(hw) = hw {
+        cmd.args(hw.decode_args);
     }
     cmd.arg("-i").arg(&src);
-    if hw.is_some() {
-        cmd.args([
-            "-vf", &format!("scale_vaapi=w=-2:h={PROXY_HEIGHT}"),
-            "-c:v", "h264_vaapi", "-qp", "28",
-        ]);
+    if let Some(hw) = hw {
+        cmd.args(hw.encode_args(PROXY_HEIGHT));
     } else {
         cmd.args([
             "-vf", &format!("scale=-2:'min({PROXY_HEIGHT},ih)'"),

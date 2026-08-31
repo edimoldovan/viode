@@ -368,8 +368,8 @@ impl RenderBackend for GesBackend {
         let h264_caps = gst::Caps::builder("video/x-h264").build();
         let mut video_builder = gst_pbutils::EncodingVideoProfile::builder(&h264_caps);
         // Opt-B: force a hardware encoder by factory name when asked.
-        if std::env::var("VIODE_HWACCEL").ok().as_deref() == Some("vaapi") {
-            video_builder = video_builder.preset_name("vah264enc");
+        if let Some(hw) = crate::hwaccel::from_env() {
+            video_builder = video_builder.preset_name(hw.ges_encoder);
         }
         let video_profile = video_builder.build();
         let audio_profile = gst_pbutils::EncodingAudioProfile::builder(

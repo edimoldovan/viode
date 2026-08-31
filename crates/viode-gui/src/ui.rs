@@ -628,7 +628,7 @@ impl GuiApp {
             painter.vline(
                 x,
                 egui::Rangef::new(y + RULER_H - 6.0, y + RULER_H),
-                Stroke::new(1.0, self.theme.dim),
+                Stroke::new(1.0_f32, self.theme.dim),
             );
             painter.text(
                 Pos2::new(x + 3.0, y + 1.0),
@@ -700,7 +700,7 @@ impl GuiApp {
                     painter.rect_stroke(
                         rect,
                         CornerRadius::same(2),
-                        Stroke::new(2.0, self.theme.accent),
+                        Stroke::new(2.0_f32, self.theme.accent),
                         egui::StrokeKind::Outside,
                     );
                 }
@@ -779,7 +779,7 @@ impl GuiApp {
         painter.vline(
             x,
             egui::Rangef::new(ruler_y, y),
-            Stroke::new(2.0, self.theme.accent),
+            Stroke::new(2.0_f32, self.theme.accent),
         );
         let handle = [
             Pos2::new(x - 5.0, ruler_y),
@@ -865,7 +865,7 @@ impl GuiApp {
             rect,
             CornerRadius::same(2),
             Stroke::new(
-                if selected { 2.0 } else { 1.0 },
+                if selected { 2.0_f32 } else { 1.0_f32 },
                 if selected { self.theme.accent } else { self.theme.clip_edge },
             ),
             egui::StrokeKind::Inside,

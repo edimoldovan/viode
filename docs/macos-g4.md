@@ -40,6 +40,49 @@ source. The GUI did not exist yet; G4 is about the GUI.
    relocated GStreamer, codesign + notarization, and a CI build. Not
    before — packaging a moving target is wasted work.
 
+## Findings (2026-08-31, on the M5 Max)
+
+Step 1 — launch. The predicted fight happened exactly as written:
+`run_gui` wraps the closure in `gst::macos_main`, which runs it OFF the
+main thread, and winit aborts ("EventLoop must be created on the main
+thread"). Fix: the `gui` verb no longer goes through `run_gui` — eframe
+owns the NSApplication itself, which also satisfies GStreamer-GL (no
+main-thread warning appears in the GUI's log anymore). `viode play`
+keeps its `run_gui` wrapper: the GStreamer preview window has no winit
+and still needs the Cocoa loop. The GUI launches, runs its event loop
+at idle CPU, and live-reloads a CLI edit made while it was open.
+
+Step 3 — `tui_open` on macOS. Fixed as planned: when no CLI terminal
+emulator answers, the server writes an executable `.command` script to
+the temp dir and runs `open -a Terminal` on it — verified end to end
+on this machine (Terminal.app opens and runs the TUI). Paths are
+single-quoted through a tested `sh_quote` helper. `$TERMINAL` and
+ghostty/kitty et al. still win when present.
+
+Step 4 — theme. Decision: keep the neutral dark fallback and do not
+read the system light/dark preference. Every serious NLE is dark
+regardless of OS theme, and one fewer platform branch is one fewer
+thing to break; revisit only if daily use argues otherwise.
+
+Step 5 — hardware acceleration. `VIODE_HWACCEL` is now per-platform,
+defined once in `viode-core/src/hwaccel.rs` and shared by proxies, the
+GES render, and both bench verbs: VA-API on Linux, VideoToolbox on
+macOS (`-hwaccel videotoolbox` + `scale_vt` + `h264_videotoolbox` for
+ffmpeg, `vtenc_h264` for GES — confirmed instantiated via
+GST_DEBUG). The measured verdict on this machine, 30s of 4K60
+Big Buck Bunny to a 540p proxy: software 1.8s, VideoToolbox 7.3s —
+**software wins 4.0x, leave VIODE_HWACCEL unset on the M5 Max**. Same
+rule as Linux: the hardware path exists, is one export away, and stays
+off without a local win. (For GES renders the point is moot anyway:
+Homebrew's vtenc_h264 ranks primary, so encodebin picks VideoToolbox
+by default there.)
+
+Step 2 — exercising the whole surface (playback, JKL, scrubbing, edits,
+inspector, angles, transcript, scopes, render dialog, relink) is Ed's
+part, with eyes on the window; nothing else can judge whether video
+actually shows. Step 6 (packaging) stays untouched until daily use is
+stable, per the order of work.
+
 ## House rules that apply here
 
 Every fix ships with a test or a bootstrap-doc entry, `cargo test`

@@ -270,9 +270,10 @@ pub fn definitions() -> Vec<Value> {
         ),
         tool(
             "bench",
-            "Measure software vs VA-API encoding on a sample of the given \
-             file and report which path wins on THIS machine (whether to \
-             set VIODE_HWACCEL=vaapi).",
+            "Measure software vs hardware encoding (VA-API on Linux, \
+             VideoToolbox on macOS) on a sample of the given file and \
+             report which path wins on THIS machine (whether to set \
+             VIODE_HWACCEL).",
             json!({
                 "path": {"type": "string"},
                 "secs": {"type": "integer", "default": 30},
@@ -1288,7 +1289,40 @@ fn tui_open(server: &Server) -> Result<Vec<Value>> {
             )));
         }
     }
+    // macOS fallback: no CLI emulator answered, so hand Terminal.app an
+    // executable .command script — `open -a Terminal` runs those directly,
+    // and Terminal is present on every Mac.
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let script = std::env::temp_dir().join("viode-tui.command");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nexec {} --project {} tui\n",
+                sh_quote(&exe.to_string_lossy()),
+                sh_quote(&file.to_string_lossy())
+            ),
+        )?;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755))?;
+        let opened = Command::new("open")
+            .args(["-a", "Terminal"])
+            .arg(&script)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if opened {
+            return Ok(text("terminal UI opened in Terminal.app — the user closes it"));
+        }
+    }
     bail!("no terminal emulator found (set $TERMINAL, or install alacritty/ghostty/kitty/foot)")
+}
+
+/// Single-quote `s` for /bin/sh so paths with spaces or quotes survive
+/// the .command script round-trip.
+#[cfg(any(target_os = "macos", test))]
+fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', r"'\''"))
 }
 
 fn media_missing(server: &Server) -> Result<Vec<Value>> {
@@ -1331,7 +1365,7 @@ fn queue_add(server: &Server, args: &Value) -> Result<Vec<Value>> {
 fn bench_tool(args: &Value) -> Result<Vec<Value>> {
     let file = PathBuf::from(str_arg(args, "path")?);
     let secs = args.get("secs").and_then(Value::as_u64).unwrap_or(30);
-    let run = |label: &str, pre: &[&str], post: &[&str]| -> Option<f64> {
+    let run = |label: &str, pre: &[String], post: &[String]| -> Option<f64> {
         let tmp = std::env::temp_dir().join(format!("viode-bench-{label}.mp4"));
         let start = std::time::Instant::now();
         let ok = Command::new("ffmpeg")
@@ -1348,22 +1382,31 @@ fn bench_tool(args: &Value) -> Result<Vec<Value>> {
         let _ = std::fs::remove_file(&tmp);
         ok.then_some(elapsed)
     };
-    let sw = run("sw", &[], &["-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"]);
-    let hw = run(
-        "hw",
-        &["-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128", "-hwaccel_output_format", "vaapi"],
-        &["-vf", "scale_vaapi=w=-2:h=540", "-c:v", "h264_vaapi", "-qp", "28", "-an"],
-    );
+    let owned = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
+    let sw = run("sw", &[], &owned(&["-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"]));
+    // Per-platform hardware candidate, shared with the CLI and the proxy
+    // builder (viode_core::hwaccel).
+    let Some(hwdef) = viode_core::hwaccel::platform() else {
+        return Ok(text(serde_json::to_string_pretty(&json!({
+            "software_secs": sw,
+            "verdict": "no hardware path is defined for this platform — software is the path",
+        }))?));
+    };
+    let mut enc = hwdef.encode_args(540);
+    enc.push("-an".into());
+    let hw = run("hw", &owned(hwdef.decode_args), &enc);
     let verdict = match (sw, hw) {
         (Some(s), Some(h)) if h < s => format!(
-            "VA-API wins {:.1}x — set VIODE_HWACCEL=vaapi on this machine", s / h),
+            "{} wins {:.1}x — set VIODE_HWACCEL={} on this machine",
+            hwdef.label, s / h, hwdef.env_value),
         (Some(s), Some(h)) => format!(
             "software wins {:.1}x — leave VIODE_HWACCEL unset", h / s),
-        (Some(_), None) => "VA-API unavailable — software stays the path".into(),
+        (Some(_), None) => format!("{} unavailable — software stays the path", hwdef.label),
         _ => bail!("benchmark could not run either path"),
     };
     Ok(text(serde_json::to_string_pretty(&json!({
-        "software_secs": sw, "vaapi_secs": hw, "verdict": verdict,
+        "software_secs": sw, "hardware_secs": hw, "hardware": hwdef.env_value,
+        "verdict": verdict,
     }))?))
 }
 
@@ -1651,4 +1694,17 @@ fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
         final_path.display(),
         project.total_duration()
     )))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sh_quote;
+
+    #[test]
+    fn sh_quote_survives_spaces_and_quotes() {
+        assert_eq!(sh_quote("/plain/path"), "'/plain/path'");
+        assert_eq!(sh_quote("/with space/x"), "'/with space/x'");
+        // A single quote closes, escapes, and reopens: ' -> '\''
+        assert_eq!(sh_quote("it's"), r"'it'\''s'");
+    }
 }

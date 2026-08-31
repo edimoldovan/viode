@@ -715,7 +715,10 @@ fn run() -> Result<()> {
             Ok(())
         }),
         Cmd::Tui => viode_tui::run(&cli.project),
-        Cmd::Gui => viode_core::run_gui(|| viode_gui::run(&cli.project)),
+        // The GUI must NOT go through run_gui: eframe/winit owns the Cocoa
+        // main loop itself (macos_main would run it off the main thread,
+        // and winit aborts when its EventLoop is created anywhere else).
+        Cmd::Gui => viode_gui::run(&cli.project),
         Cmd::Serve { mcp } => {
             if !mcp {
                 bail!("only --mcp is supported for now (viode serve --mcp)");
@@ -1269,7 +1272,7 @@ fn cmd_media(project_file: &Path, cmd: MediaCmd) -> Result<()> {
 /// Opt-B honesty tool: measure both encode paths on the user's OWN
 /// footage; the winner (and the env to set) is printed, never assumed.
 fn cmd_bench(file: &Path, secs: u32) -> Result<()> {
-    let run = |label: &str, args: &[&str]| -> Result<Option<f64>> {
+    let run = |label: &str, args: &[String]| -> Result<Option<f64>> {
         let tmp = std::env::temp_dir().join(format!("viode-bench-{label}.mp4"));
         let start = std::time::Instant::now();
         let status = std::process::Command::new("ffmpeg")
@@ -1291,28 +1294,32 @@ fn cmd_bench(file: &Path, secs: u32) -> Result<()> {
         }
     };
     println!("benchmarking {} ({secs}s sample):", file.display());
+    let owned = |v: &[&str]| v.iter().map(|a| a.to_string()).collect::<Vec<_>>();
     let sw = run(
         "software (libx264)",
-        &["-i", "-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"],
+        &owned(&["-i", "-vf", "scale=-2:540", "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an"]),
     )?;
-    let hw = run(
-        "vaapi (hw decode+encode)",
-        &[
-            "-hwaccel", "vaapi", "-hwaccel_device", "/dev/dri/renderD128",
-            "-hwaccel_output_format", "vaapi",
-            "-i", "-vf", "scale_vaapi=w=-2:h=540", "-c:v", "h264_vaapi", "-qp", "28", "-an",
-        ],
-    )?;
+    // The candidate hardware path is per-platform (viode_core::hwaccel):
+    // VA-API on Linux, VideoToolbox on macOS.
+    let Some(hwdef) = viode_core::hwaccel::platform() else {
+        println!("verdict: no hardware path is defined for this platform — software is the path");
+        return Ok(());
+    };
+    let mut hw_args = owned(hwdef.decode_args);
+    hw_args.push("-i".into());
+    hw_args.extend(hwdef.encode_args(540));
+    hw_args.push("-an".into());
+    let hw = run(&format!("{} (hw decode+encode)", hwdef.label), &hw_args)?;
     match (sw, hw) {
         (Some(s), Some(h)) if h < s => println!(
-            "verdict: VA-API wins {:.1}x on this machine — export VIODE_HWACCEL=vaapi",
-            s / h
+            "verdict: {} wins {:.1}x on this machine — export VIODE_HWACCEL={}",
+            hwdef.label, s / h, hwdef.env_value
         ),
         (Some(s), Some(h)) => println!(
             "verdict: software wins {:.1}x on this machine — leave VIODE_HWACCEL unset",
             h / s
         ),
-        (Some(_), None) => println!("verdict: VA-API unavailable — software stays the path"),
+        (Some(_), None) => println!("verdict: {} unavailable — software stays the path", hwdef.label),
         _ => bail!("benchmark could not run either path"),
     }
     Ok(())

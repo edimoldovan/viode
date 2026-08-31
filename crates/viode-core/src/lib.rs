@@ -5,6 +5,7 @@ pub mod artifacts;
 pub mod audio;
 pub mod backend;
 pub mod export;
+pub mod hwaccel;
 pub mod media;
 pub mod model;
 pub mod ops;
