@@ -212,6 +212,15 @@ stays unset there. Ed exercised the GUI surface on the Mac and called
 it done. Phase 8 is complete on both platforms; packaging remains
 deferred by Ed's call and is the only G4 leftover.
 
+**Phase 9 (distribution) — planned (2026-09-01), not started.** Ed's
+decision: users must be able to install on Linux, macOS, and Windows.
+Windows is PARKED until Ed starts a VM on Omarchy — do not begin
+Windows work before then. The Linux + macOS plan is in PLAN.md Phase 9:
+D1 release spine (CI on both OSes + tagged v0.1.0 release), D2 package
+managers (AUR + Homebrew tap), D3 native bundles (.deb/.rpm; notarized
+.app gated on an Apple Developer account, Ed's call). This supersedes
+"packaging deferred" above.
+
 Ed's verdict on the TUI-based showcase: not presentable to a general
 audience; the GUI is the shareable face. Showcase footage lesson: the
 benchmark media (SD public-domain films) is deliberately ugly for
