@@ -368,15 +368,37 @@ fn draw_details(f: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_status(f: &mut Frame, app: &App, area: Rect) {
+    // The help trigger stays visible on the right even while a message is
+    // showing — a bold reversed chip, not a tail lost in the hint pile.
+    const HELP_CHIP: &str = " ? help ";
+    let chip_w = HELP_CHIP.len() as u16;
+    let (left, right) = if area.width > chip_w {
+        (
+            Rect { width: area.width - chip_w, ..area },
+            Rect { x: area.x + area.width - chip_w, width: chip_w, ..area },
+        )
+    } else {
+        (area, Rect { width: 0, ..area })
+    };
     let widget = if app.message.is_empty() {
         Paragraph::new(
-            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  v live  P composited  r render  ? help  q quit",
+            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  v live  P composited  r render  q quit",
         )
         .style(Style::default().fg(Color::DarkGray))
     } else {
         Paragraph::new(app.message.as_str()).style(Style::default().fg(Color::Yellow))
     };
-    f.render_widget(widget, area);
+    f.render_widget(widget, left);
+    if right.width > 0 {
+        f.render_widget(
+            Paragraph::new(HELP_CHIP).style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::REVERSED | Modifier::BOLD),
+            ),
+            right,
+        );
+    }
 }
 
 fn draw_help(f: &mut Frame) {

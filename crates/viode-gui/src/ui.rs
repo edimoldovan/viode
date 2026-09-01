@@ -611,12 +611,46 @@ impl GuiApp {
         }
         let dirty = if self.editor.dirty { "● " } else { "" };
         painter.text(
-            Pos2::new(panel.right() - 10.0, y),
+            Pos2::new(panel.right() - 88.0, y),
             Align2::RIGHT_CENTER,
-            format!("{dirty}{}   ? keys", self.editor.project.project.name),
+            format!("{dirty}{}", self.editor.project.project.name),
             FontId::proportional(11.0),
             if self.editor.dirty { self.theme.accent } else { self.theme.dim },
         );
+    }
+
+    /// The visible help trigger: a real button in the header, not a dim
+    /// painter hint. Toggles the same overlay as the `?` key.
+    fn help_button(&mut self, ui: &mut egui::Ui, panel: &Rect) {
+        let rect = Rect::from_center_size(
+            Pos2::new(panel.right() - 44.0, panel.top() + HEADER_H / 2.0),
+            egui::vec2(64.0, 20.0),
+        );
+        let response = ui.allocate_rect(rect, Sense::click());
+        let fill = if response.hovered() {
+            self.theme.accent.gamma_multiply(0.35)
+        } else {
+            self.theme.accent.gamma_multiply(0.18)
+        };
+        let painter = ui.painter();
+        painter.rect_filled(rect, CornerRadius::same(10), fill);
+        painter.rect_stroke(
+            rect,
+            CornerRadius::same(10),
+            Stroke::new(1.0_f32, self.theme.accent),
+            egui::StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            "?  Help",
+            FontId::proportional(11.0),
+            self.theme.accent,
+        );
+        if response.clicked() {
+            self.state.show_help = !self.state.show_help;
+        }
+        response.on_hover_text("Keyboard and mouse reference (?)");
     }
 
     fn draw_ruler(&self, painter: &egui::Painter, map: &TimelineMap, y: f32) {
@@ -667,6 +701,7 @@ impl GuiApp {
 
         let painter = ui.painter().clone();
         self.draw_header(&painter, &panel);
+        self.help_button(ui, &panel);
         let mut y = panel.top() + HEADER_H;
         let ruler_y = y;
         // Marked range band ([ and ]) under the ruler ticks.
@@ -1800,9 +1835,11 @@ impl GuiApp {
         if !self.state.show_help {
             return;
         }
+        let mut open = true;
         egui::Window::new("Keys")
             .collapsible(false)
             .resizable(false)
+            .open(&mut open)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.monospace("space      play / pause      J/K/L  shuttle");
@@ -1828,6 +1865,9 @@ impl GuiApp {
                 ui.monospace("r          render dialog");
                 ui.monospace("q          quit (asks when unsaved)");
             });
+        if !open {
+            self.state.show_help = false;
+        }
     }
 
     fn draw_quit_confirm(&mut self, ctx: &egui::Context) {

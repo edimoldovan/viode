@@ -183,6 +183,10 @@ and therefore aether/Omarchy — is running.
 | `r` | render the master |
 | `w` / `q` / `?` | save / quit (confirms if unsaved) / help |
 
+The `? help` chip on the right of the status line stays visible at all
+times; in the GUI, the same reference sits behind the `?  Help` button
+in the timeline header (or press `?`).
+
 ## The GUI viewer
 
 `viode gui` opens the current directory's project; `viode gui <path>`
