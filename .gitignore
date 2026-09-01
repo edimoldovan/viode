@@ -3,3 +3,7 @@
 /renders/
 /cache/
 /proxies/
+
+# local-only planning docs
+PLAN.md
+MONETIZATION.md

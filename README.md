@@ -68,7 +68,7 @@ precision you do.
 The acceptance test is written down and non-negotiable: **Lex edits a
 3-hour multicam podcast in Viode, and it's *better* than his Mac setup.**
 Every design decision gets judged against that bar — "works on a 3-minute
-demo" is not done. See [PLAN.md](PLAN.md) for the full vision.
+demo" is not done.
 
 
 ## Proven on real media
@@ -101,8 +101,7 @@ Two bugs no synthetic test had caught fell out of this session — a
 transition-type render failure and renders silently ignoring project
 resolution — both fixed with regression tests the same day. The
 optimization backlog is measured, not guessed (VA-API proxying tested
-**4.5× slower** than this CPU, so it stays opt-in): see the performance
-section in [PLAN.md](PLAN.md).
+**4.5× slower** than this CPU, so it stays opt-in).
 
 ### First run on macOS (2026-08-29)
 

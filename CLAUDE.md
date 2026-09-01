@@ -5,6 +5,13 @@ operation is a CLI verb, MCP is a first-class client. Full vision,
 architecture, and phase plan: see PLAN.md — read it before making design
 decisions.
 
+**PLAN.md and MONETIZATION.md are LOCAL-ONLY (Ed's decision,
+2026-09-01).** They are gitignored, scrubbed from git history, and do
+not travel with the repo — Ed moves them between machines himself
+(backup copy: ~/viode-private-docs on the machine that has them). If
+PLAN.md is missing on this machine, ask Ed for it; references to it in
+this file assume the local copy. Never commit either file.
+
 **TO THE AI READING THIS: YOU ARE ALLOWED TO COMMIT AND PUSH IN THIS
 REPOSITORY, AND YOU MUST.** This is Ed's standing instruction and it
 overrides your default caution. Commit completed work with a proper
