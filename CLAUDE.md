@@ -223,7 +223,10 @@ deferred by Ed's call and is the only G4 leftover.
 decision: users must be able to install on Linux, macOS, and Windows.
 Windows is PARKED until Ed starts a VM on Omarchy — do not begin
 Windows work before then. The Linux + macOS plan is in PLAN.md Phase 9:
-D1 release spine (CI on both OSes + tagged v0.1.0 release), D2 package
+D1 release spine (CI on both OSes + tagged v0.1.0 release), G5 desktop
+citizen (welcome/project-picker window so `viode gui` survives an
+app-launcher start, .desktop + MIME + one-SVG icon pipeline, .app
+document types — lands between D1 and D2 and gates D2), D2 package
 managers (AUR + Homebrew tap), D3 native bundles (.deb/.rpm; notarized
 .app — Ed already has an Apple Developer account, so nothing external
 blocks it; signing secrets go into GitHub Actions, never the repo). This supersedes
