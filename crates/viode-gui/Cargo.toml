@@ -15,6 +15,7 @@ gstreamer-editing-services.workspace = true
 gstreamer-app.workspace = true
 gstreamer-video.workspace = true
 image = { version = "0.25", default-features = false, features = ["png"] }
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
 
 [dev-dependencies]
 tempfile = "3"

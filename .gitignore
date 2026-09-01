@@ -7,3 +7,5 @@
 # local-only planning docs
 PLAN.md
 MONETIZATION.md
+/packaging/icons/hicolor/
+PLAN-MAC.md

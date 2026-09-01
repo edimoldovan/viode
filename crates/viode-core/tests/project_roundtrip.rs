@@ -185,3 +185,27 @@ fn positions_and_total_stay_consistent_through_edits() {
     let last = clips.len() - 1;
     assert_eq!(positions[last] + clips[last].len(), project.total_duration());
 }
+
+#[test]
+fn init_scaffolds_a_loadable_project_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("mycut");
+    let file = Project::init(&dir, 25.0, [1280, 720]).unwrap();
+
+    assert_eq!(file, dir.join("project.viode"));
+    for sub in ["media", "renders", "cache", "proxies"] {
+        assert!(dir.join(sub).is_dir(), "missing {sub}/");
+    }
+    assert!(dir.join(".gitignore").is_file());
+    let loaded = Project::load(&file).unwrap();
+    assert_eq!(loaded.project.name, "mycut");
+    assert_eq!(loaded.project.fps, 25.0);
+    assert_eq!(loaded.project.resolution, [1280, 720]);
+}
+
+#[test]
+fn init_refuses_existing_paths_with_a_helpful_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let err = Project::init(tmp.path(), 30.0, [1920, 1080]).unwrap_err().to_string();
+    assert!(err.contains("already exists"), "unhelpful error: {err}");
+}

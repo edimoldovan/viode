@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Viode app icon. Single source of truth: rasterized into hicolor PNGs
+       by scripts/gen-icons.sh (Linux) and into an .icns for the macOS
+       bundle. Composition: a play mark over a two-lane timeline with the
+       playhead scrubbed into the second clip - "video" plus "editor" in
+       two shapes that survive 16x16. -->
+  <defs>
+    <linearGradient id="tri" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="#171a23"/>
+  <!-- play mark -->
+  <path d="M 200 108 L 200 260 L 340 184 Z" fill="url(#tri)" stroke="url(#tri)"
+        stroke-width="28" stroke-linejoin="round"/>
+  <!-- timeline lanes -->
+  <rect x="72" y="316" width="150" height="60" rx="14" fill="#22d3ee"/>
+  <rect x="238" y="316" width="202" height="60" rx="14" fill="#8b5cf6"/>
+  <rect x="72" y="392" width="368" height="40" rx="12" fill="#2b3140"/>
+  <!-- waveform hint in the audio lane -->
+  <path d="M 92 412 l 24 -10 l 24 16 l 24 -12 l 24 8 l 24 -14 l 24 12 l 24 -8 l 24 10 l 24 -14 l 24 10 l 24 -6 l 24 8 l 24 -10 l 24 6"
+        fill="none" stroke="#67e8f9" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <!-- playhead -->
+  <path d="M 296 292 l 18 0 l 0 8 l -9 12 l -9 -12 Z" fill="#f4f6fb"/>
+  <rect x="301" y="300" width="8" height="148" rx="4" fill="#f4f6fb"/>
+</svg>

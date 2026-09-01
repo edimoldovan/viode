@@ -82,7 +82,7 @@ pub struct GuiApp {
 
 impl GuiApp {
     pub fn new(
-        cc: &eframe::CreationContext<'_>,
+        ctx: &egui::Context,
         project: Project,
         project_file: PathBuf,
         project_dir: PathBuf,
@@ -92,10 +92,10 @@ impl GuiApp {
         visuals.panel_fill = theme.bg;
         visuals.window_fill = theme.lane;
         visuals.override_text_color = Some(theme.fg);
-        cc.egui_ctx.set_visuals(visuals);
+        ctx.set_visuals(visuals);
         let total = timeline_end(&project);
         let state = State::new(total, project.project.fps);
-        let repaint = cc.egui_ctx.clone();
+        let repaint = ctx.clone();
         let player = Player::spawn(move || repaint.request_repaint());
         if total != Time::ZERO {
             player.load(&project, &project_dir);

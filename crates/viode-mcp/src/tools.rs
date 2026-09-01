@@ -875,20 +875,7 @@ fn project_new(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
     let width = args.get("width").and_then(Value::as_u64).unwrap_or(1920) as u32;
     let height = args.get("height").and_then(Value::as_u64).unwrap_or(1080) as u32;
 
-    if path.exists() {
-        bail!("{} already exists", path.display());
-    }
-    for sub in ["media", "renders", "cache", "proxies"] {
-        std::fs::create_dir_all(path.join(sub))?;
-    }
-    std::fs::write(path.join(".gitignore"), "/renders/\n/cache/\n/proxies/\n")?;
-    let name = path
-        .file_name()
-        .context("project path has no name")?
-        .to_string_lossy()
-        .to_string();
-    let file = path.join(PROJECT_FILE);
-    Project::new(&name, fps, [width, height]).save(&file)?;
+    let file = Project::init(&path, fps, [width, height])?;
     server.project_file = Some(file);
     Ok(text(format!(
         "created and opened {} ({width}x{height} @ {fps} fps)",

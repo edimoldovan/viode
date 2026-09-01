@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Viode
+GenericName=Video Editor
+Comment=AI-native video editor
+Exec=viode gui %f
+TryExec=viode
+Icon=viode
+Terminal=false
+Categories=AudioVideo;AudioVideoEditing;
+MimeType=application/x-viode;
+Keywords=video;editor;timeline;edit;cut;
+StartupWMClass=viode

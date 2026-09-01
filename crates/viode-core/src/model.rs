@@ -255,6 +255,10 @@ pub enum ProjectError {
     Parse(PathBuf, #[source] toml::de::Error),
     #[error("failed to serialize project: {0}")]
     Serialize(#[from] toml::ser::Error),
+    #[error("{0} already exists")]
+    Exists(PathBuf),
+    #[error("{0} is not a usable project directory name")]
+    InvalidName(PathBuf),
 }
 
 impl Project {
@@ -292,6 +296,31 @@ impl Project {
     pub fn save(&self, path: &Path) -> Result<(), ProjectError> {
         let text = toml::to_string_pretty(self)?;
         fs::write(path, text).map_err(|e| ProjectError::Io(path.to_path_buf(), e))
+    }
+
+    /// Scaffold a new project directory — subdirectories, .gitignore, and a
+    /// fresh project file named after the directory — and return the path of
+    /// the project file. Every interface (CLI `new`, MCP `project_new`, the
+    /// GUI welcome screen) creates projects through this one function.
+    pub fn init(dir: &Path, fps: f64, resolution: [u32; 2]) -> Result<PathBuf, ProjectError> {
+        if dir.exists() {
+            return Err(ProjectError::Exists(dir.to_path_buf()));
+        }
+        let name = dir
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .filter(|n| !n.is_empty())
+            .ok_or_else(|| ProjectError::InvalidName(dir.to_path_buf()))?;
+        for sub in ["media", "renders", "cache", "proxies"] {
+            let sub = dir.join(sub);
+            fs::create_dir_all(&sub).map_err(|e| ProjectError::Io(sub.clone(), e))?;
+        }
+        let gitignore = dir.join(".gitignore");
+        fs::write(&gitignore, "/renders/\n/cache/\n/proxies/\n")
+            .map_err(|e| ProjectError::Io(gitignore.clone(), e))?;
+        let file = dir.join(PROJECT_FILE);
+        Project::new(&name, fps, resolution).save(&file)?;
+        Ok(file)
     }
 
     pub fn main(&self) -> &Track {

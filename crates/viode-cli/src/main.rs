@@ -336,8 +336,12 @@ enum Cmd {
     },
     /// Open the timeline in the terminal UI
     Tui,
-    /// Open the timeline in the GUI viewer (live preview + timeline)
-    Gui,
+    /// Open the GUI: a project file or directory, the current directory's
+    /// project, or the welcome screen when there is neither
+    Gui {
+        /// Project file or project directory (as passed by file managers)
+        path: Option<PathBuf>,
+    },
     /// Run the MCP server (stdio) — lets AI clients edit the project
     Serve {
         #[arg(long)]
@@ -718,7 +722,19 @@ fn run() -> Result<()> {
         // The GUI must NOT go through run_gui: eframe/winit owns the Cocoa
         // main loop itself (macos_main would run it off the main thread,
         // and winit aborts when its EventLoop is created anywhere else).
-        Cmd::Gui => viode_gui::run(&cli.project),
+        Cmd::Gui { path } => {
+            // App-launcher and file-manager starts land here with no useful
+            // working directory: no path and no project.viode in cwd means
+            // the welcome screen, not an error.
+            let target = match path {
+                Some(p) => Some(if p.is_dir() { p.join(PROJECT_FILE) } else { p }),
+                None => cli.project.exists().then(|| cli.project.clone()),
+            };
+            match target {
+                Some(file) => viode_gui::run(&file),
+                None => viode_gui::run_welcome(),
+            }
+        }
         Cmd::Serve { mcp } => {
             if !mcp {
                 bail!("only --mcp is supported for now (viode serve --mcp)");
@@ -766,15 +782,7 @@ fn cmd_new(name: &str, fps: f64, res: &str) -> Result<()> {
         .and_then(|(w, h)| Some((w.parse::<u32>().ok()?, h.parse::<u32>().ok()?)))
         .with_context(|| format!("invalid --res {res:?}, expected WIDTHxHEIGHT"))?;
 
-    let dir = PathBuf::from(name);
-    if dir.exists() {
-        bail!("{name} already exists");
-    }
-    for sub in ["media", "renders", "cache", "proxies"] {
-        fs::create_dir_all(dir.join(sub))?;
-    }
-    fs::write(dir.join(".gitignore"), "/renders/\n/cache/\n/proxies/\n")?;
-    Project::new(name, fps, [w, h]).save(&dir.join(PROJECT_FILE))?;
+    Project::init(&PathBuf::from(name), fps, [w, h])?;
     println!("created {name}/ ({w}x{h} @ {fps} fps)");
     Ok(())
 }

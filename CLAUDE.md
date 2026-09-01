@@ -219,18 +219,30 @@ stays unset there. Ed exercised the GUI surface on the Mac and called
 it done. Phase 8 is complete on both platforms; packaging remains
 deferred by Ed's call and is the only G4 leftover.
 
-**Phase 9 (distribution) — planned (2026-09-01), not started.** Ed's
-decision: users must be able to install on Linux, macOS, and Windows.
-Windows is PARKED until Ed starts a VM on Omarchy — do not begin
-Windows work before then. The Linux + macOS plan is in PLAN.md Phase 9:
-D1 release spine (CI on both OSes + tagged v0.1.0 release), G5 desktop
-citizen (welcome/project-picker window so `viode gui` survives an
-app-launcher start, .desktop + MIME + one-SVG icon pipeline, .app
-document types — lands between D1 and D2 and gates D2), D2 package
-managers (AUR + Homebrew tap), D3 native bundles (.deb/.rpm; notarized
-.app — Ed already has an Apple Developer account, so nothing external
-blocks it; signing secrets go into GitHub Actions, never the repo). This supersedes
-"packaging deferred" above.
+**Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
+users must be able to install on Linux, macOS, and Windows. Windows is
+PARKED until Ed starts a VM on Omarchy — do not begin Windows work
+before then. The full Linux + macOS plan is in the local-only PLAN.md;
+refer to steps by plain names in chat, never invented codes (Ed's
+rule). Order: CI + tagged v0.1.0 release, then the AUR package and
+Homebrew tap, then .deb/.rpm and the notarized Mac app (Ed has an
+Apple Developer account; signing secrets go into GitHub Actions
+secrets, never the repo). This supersedes "packaging deferred" above.
+
+**Desktop-app integration — Linux done (2026-09-01).** `viode gui`
+with no project shows a welcome screen (recent projects from the XDG
+state dir, New Project with native dialogs via rfd/xdg-portal, Open
+Project); `viode gui <path>` opens a project file or directory
+(file-manager `%f`). Project scaffolding is lifted into
+`Project::init` in core — CLI `new`, MCP `project_new`, and the
+welcome screen all call it. `welcome.rs` logic is unit-tested; the
+welcome->editor swap happens in place (App enum in the GUI lib.rs).
+packaging/ holds the SVG icon source, viode.desktop, and the MIME XML;
+scripts/gen-icons.sh rasterizes the hicolor set (output gitignored)
+and scripts/install-desktop.sh dev-installs everything into
+~/.local/share (done on this machine — Viode is in the launcher, and
+.viode files open with it). The macOS half (.app bundle, icns,
+document types) is planned in the local-only PLAN-MAC.md.
 
 Ed's verdict on the TUI-based showcase: not presentable to a general
 audience; the GUI is the shareable face. Showcase footage lesson: the

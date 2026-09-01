@@ -185,7 +185,20 @@ and therefore aether/Omarchy — is running.
 
 ## The GUI viewer
 
-`viode gui` opens the project in a native window (egui) laid out like an
+`viode gui` opens the current directory's project; `viode gui <path>`
+opens a project file or directory from anywhere. Started with neither —
+which is what launching Viode from the app menu looks like — it shows a
+welcome screen instead: recent projects, New Project (name, fps,
+resolution, location), and an Open Project file dialog. Every project
+you open lands in the recents list automatically, however you opened it.
+
+To put Viode in your app launcher and associate `.viode` project files
+with it before packages exist, run `./scripts/install-desktop.sh` (it
+installs the icon, launcher entry, and file association into
+`~/.local/share`; `--uninstall` removes them). The packages will install
+the same files system-wide.
+
+The window itself (egui) is laid out like an
 NLE: the preview dominates, and the timeline docks below it with a
 prominent timecode, track headers on the left (V1/A1 style; video lanes
 stack above V1, audio lanes below A1), real filmstrips and waveforms, and

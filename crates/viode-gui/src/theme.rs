@@ -7,6 +7,7 @@
 
 use eframe::egui::Color32;
 
+#[derive(Clone, Copy)]
 pub struct Palette {
     /// Window and panel background.
     pub bg: Color32,
