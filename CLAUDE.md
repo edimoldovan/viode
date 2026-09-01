@@ -230,6 +230,17 @@ demos — use ONE Blender Studio film (Spring / Sprite Fright / Charge,
 titles before the next showcase render. Packaging still deferred by
 Ed's call.
 
+## Ownership and licensing (settled)
+
+Eduard Moldovan AB owns the software. The license is PolyForm Strict
+1.0.0 (LICENSE at the repo root): source is visible, but copying,
+modification, and redistribution are prohibited — personal use is the
+only granted right. Commercial licenses are sold exclusively through
+eduardmoldovan.com. There will be no hosted "Viode Cloud" services —
+Ed has ruled them out permanently. Business analysis: MONETIZATION.md.
+Outside contributions require a signed grant to the company before
+merging.
+
 ## Stack decisions (settled — don't relitigate casually)
 
 - **Rust** + **GStreamer Editing Services (GES)** as the render/preview engine.
