@@ -23,7 +23,13 @@ else
     ./scripts/gen-icons.sh
     mkdir -p "$APPS" "$MIME/packages"
     cp -r packaging/icons/hicolor/. "$ICONS/"
-    cp packaging/linux/viode.desktop "$APPS/"
+    # The launcher runs with the session PATH, not your shell's — a dev
+    # build of viode usually is not on it. Bake the absolute path into
+    # the installed entry; the packages install to /usr/bin and keep the
+    # plain Exec=viode.
+    BIN="$(command -v viode)"
+    sed "s|^Exec=viode|Exec=$BIN|; s|^TryExec=viode|TryExec=$BIN|" \
+        packaging/linux/viode.desktop > "$APPS/viode.desktop"
     cp packaging/linux/viode-mime.xml "$MIME/packages/viode.xml"
 fi
 

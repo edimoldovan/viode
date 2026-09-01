@@ -7,6 +7,7 @@ Exec=viode gui %f
 TryExec=viode
 Icon=viode
 Terminal=false
+StartupNotify=false
 Categories=AudioVideo;AudioVideoEditing;
 MimeType=application/x-viode;
 Keywords=video;editor;timeline;edit;cut;
