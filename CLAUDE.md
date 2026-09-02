@@ -465,6 +465,19 @@ locked out. To make this linkable, `viode-cli` is a library exposing
 `viode_cli::run()` plus a thin `main.rs`; public evaluation builds
 stay ungated.
 
+**The announcement channel (2026-09-02).** A `message` on a VALID
+response is a developer announcement: the official binary prints it
+to stderr and exports it as `VIODE_NOTICE`; the public GUI (left
+panel), TUI (status line), and MCP (initialize instructions) display
+that env var when present — source builds never set it, so the public
+repo stays phone-home-free. Server side, the message comes from
+`viode-message.txt` next to the fastpost binary (override with
+`VIODE_MESSAGE_FILE`): edit the file and every official install shows
+it on next launch; empty or missing file means silence. This is also
+the migration path to paid: announce in-app for weeks, ship
+key-checking versions, and only flip `valid: false` for versions that
+were told.
+
 ## Stack decisions (settled — don't relitigate casually)
 
 - **Rust** + **GStreamer Editing Services (GES)** as the render/preview engine.
