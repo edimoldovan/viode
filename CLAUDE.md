@@ -337,6 +337,14 @@ platform-exclusive dependency. Cloud collaboration, AE dynamic link,
 and 360/VR are deliberately excluded. If PLAN.md is not on this
 machine, ask Ed for it before starting countdown work.
 
+**Doctor rule (2026-09-02, binding).** A verb that adds an engine
+dependency (a GStreamer element, an ffmpeg filter, a sidecar binary,
+a model file) ships its doctor check in the same phase — exactly like
+it ships its palette entry. One entry in `viode_core::doctor::run()`
+reaches every front door at once (CLI checkup, MCP initialize, GUI
+banner, TUI status line) and gets vetoed by CI on brew, the weakest
+environment, before any user hits it.
+
 **GUI discoverability rule (2026-09-02, binding).** Every capability
 must be reachable and discoverable by mouse in the GUI through four
 surfaces: right-click context menus on the object, a searchable
