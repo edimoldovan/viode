@@ -219,6 +219,17 @@ stays unset there. Ed exercised the GUI surface on the Mac and called
 it done. Phase 8 is complete on both platforms; packaging remains
 deferred by Ed's call and is the only G4 leftover.
 
+**The settled implementation order (2026-09-02, Ed's ruling).**
+Distribution goes LAST — the first version anyone installs must
+already be feature-rich for a broad audience. Order: discoverability
+foundation (palette, context menus, toolbar over existing verbs) ->
+creator wave -> podcast wave -> payment plumbing (checkout, key
+issuance, real license policy) -> distribution and launch. Craft and
+depth waves follow post-launch. Carve-out: the CI half of the release
+spine (GitHub Actions building and testing on Linux and macOS) still
+happens early — only user-facing packaging waits. This supersedes the
+Phase 9 ordering below; details in the local-only PLAN.md.
+
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
 users must be able to install on Linux, macOS, and Windows. Windows is
 PARKED until Ed starts a VM on Omarchy — do not begin Windows work
