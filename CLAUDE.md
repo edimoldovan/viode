@@ -265,6 +265,16 @@ platform-exclusive dependency. Cloud collaboration, AE dynamic link,
 and 360/VR are deliberately excluded. If PLAN.md is not on this
 machine, ask Ed for it before starting countdown work.
 
+**GUI discoverability rule (2026-09-02, binding).** Every capability
+must be reachable and discoverable by mouse in the GUI through four
+surfaces: right-click context menus on the object, a searchable
+command palette that shows each verb's key combo, the inspector for
+parametric edits, and a deliberately small toolbar. Never a button
+per verb. This refines interface parity: GUI parity means
+mouse-reachable through those surfaces, not dedicated chrome per
+feature. Countdown waves ship palette and context-menu entries with
+their verbs in the same phase. Full rationale: PLAN.md.
+
 ## Ownership and licensing (settled)
 
 Eduard Moldovan AB owns the software. The repo license is PolyForm
