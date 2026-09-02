@@ -244,6 +244,21 @@ Phase 7 lacked exists now: a red clip through a red->blue .cube
 renders blue, asserted on output pixels, plus cache-reuse asserted
 via mtime.
 
+**Discoverability foundation (stage 1) — done (2026-09-02).**
+`viode-gui/src/actions.rs` is THE action table: every argumentless verb
+plus panel/dialog doors, each with label, shortcut string, and search
+keywords (Premiere vocabulary included — "razor" finds Split). ONE
+dispatch point (`GuiApp::perform`) serves the keyboard handler
+(refactored to emit Actions), the command palette (ctrl+K / ctrl+P,
+`palette.rs`, pure filter+selection logic, unit-tested, teaches
+shortcuts inline), right-click context menus (clips, title markers,
+ruler — parametric edits point at the inspector), and the small
+right-aligned header toolbar (split/delete/undo/redo/save/render/⌘
+cmds — deliberately capped). Countdown waves REGISTER NEW VERBS IN
+actions.rs and they appear in every surface at once. Not included by
+scope: track on/off has no GUI verb yet (no existing capability;
+first wave that needs it adds it via the same table).
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

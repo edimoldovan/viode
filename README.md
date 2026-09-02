@@ -203,6 +203,16 @@ in the timeline header (or press `?`).
 
 ## The GUI viewer
 
+Every command is discoverable with the mouse. `ctrl+K` (or the
+`⌘ cmds` toolbar button) opens the command palette: type what you want
+— "razor", "export", "title" — and every entry shows its key combo, so
+the palette teaches the fast path as you use it. Right-clicking a
+clip, a title marker, or the ruler offers the verbs that act on that
+object, the toolbar carries the handful everyone touches (split,
+delete, undo, redo, save, render), and the inspector holds every
+parametric edit. Keyboard and palette and menus all run the exact same
+actions — nothing lives in only one surface.
+
 `viode gui` opens the current directory's project; `viode gui <path>`
 opens a project file or directory from anywhere. Started with neither —
 which is what launching Viode from the app menu looks like — it shows a

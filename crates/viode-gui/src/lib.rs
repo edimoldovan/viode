@@ -7,8 +7,10 @@
 //! as either the welcome screen or the editor, and swaps welcome -> editor
 //! in place when a project is chosen.
 
+pub mod actions;
 pub mod edit;
 pub mod layout;
+pub mod palette;
 pub mod player;
 pub mod state;
 pub mod theme;

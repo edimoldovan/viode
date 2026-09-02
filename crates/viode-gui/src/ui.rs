@@ -17,6 +17,9 @@ use eframe::egui::{self, Align2, Color32, CornerRadius, CursorIcon, FontId, Pos2
 use viode_core::artifacts::{Kind, MediaCache, Spec};
 use viode_core::{ops, proxy_for, Clip, Project, Time, Track, TrackKind};
 
+use crate::actions::Action;
+use crate::palette::Palette as CmdPalette;
+
 use crate::edit::{DragKind, Editor, Selection};
 use crate::layout::{tick_step, timeline_end, TimelineMap};
 use crate::player::{Player, PlayerEvent};
@@ -64,6 +67,7 @@ pub struct GuiApp {
     missing: Vec<(usize, usize, PathBuf)>,
     /// Engine gaps found once at startup (see viode_core::doctor).
     engine_gaps: Vec<viode_core::doctor::Check>,
+    palette: CmdPalette,
     show_doctor: bool,
     show_relink: bool,
     relink_dir: String,
@@ -128,6 +132,7 @@ impl GuiApp {
             key_value: 1.0,
             missing: Vec::new(),
             engine_gaps: viode_core::doctor::problems(),
+            palette: CmdPalette::default(),
             show_doctor: false,
             show_relink: false,
             relink_dir: String::new(),
@@ -257,118 +262,134 @@ impl GuiApp {
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
-        // A focused text field owns the keyboard.
+        // A focused text field owns the keyboard (the palette included).
         if ctx.wants_keyboard_input() {
             return;
         }
         use egui::Key as EKey;
-        let mut transport = Vec::new();
-        let mut edits: Vec<Box<dyn FnOnce(&mut GuiApp)>> = Vec::new();
+        let mut actions: Vec<Action> = Vec::new();
         ctx.input(|i| {
             let shift = i.modifiers.shift;
             let command = i.modifiers.command;
-            let transport_map = [
-                (EKey::Space, Key::Space),
-                (EKey::J, Key::J),
-                (EKey::K, Key::K),
-                (EKey::L, Key::L),
-                (EKey::Home, Key::Home),
-                (EKey::End, Key::End),
-                (EKey::Questionmark, Key::Help),
+            let key_map = [
+                (EKey::Space, Action::PlayPause),
+                (EKey::J, Action::ShuttleReverse),
+                (EKey::K, Action::ShuttlePause),
+                (EKey::L, Action::ShuttleForward),
+                (EKey::Home, Action::GoToStart),
+                (EKey::End, Action::GoToEnd),
+                (EKey::Questionmark, Action::Help),
+                (EKey::ArrowUp, Action::PreviousEdge),
+                (EKey::ArrowDown, Action::NextEdge),
+                (EKey::I, Action::TrimInToPlayhead),
+                (EKey::O, Action::TrimOutToPlayhead),
+                (EKey::T, Action::AddTitle),
+                (EKey::OpenBracket, Action::MarkIn),
+                (EKey::CloseBracket, Action::MarkOut),
+                (EKey::R, Action::RenderDialog),
+                (EKey::Escape, Action::ClearMarks),
+                (EKey::Q, Action::Quit),
             ];
-            for (ek, k) in transport_map {
+            for (ek, a) in key_map {
                 if i.key_pressed(ek) {
-                    transport.push(k);
+                    actions.push(a);
                 }
             }
             if i.key_pressed(EKey::ArrowLeft) {
-                transport.push(if shift { Key::Left } else { Key::SmallLeft });
+                actions.push(if shift { Action::JumpBack } else { Action::NudgeBack });
             }
             if i.key_pressed(EKey::ArrowRight) {
-                transport.push(if shift { Key::Right } else { Key::SmallRight });
-            }
-            if i.key_pressed(EKey::ArrowUp) {
-                edits.push(Box::new(|a| a.jump_edge(-1)));
-            }
-            if i.key_pressed(EKey::ArrowDown) {
-                edits.push(Box::new(|a| a.jump_edge(1)));
+                actions.push(if shift { Action::JumpForward } else { Action::NudgeForward });
             }
             if i.key_pressed(EKey::Comma) {
-                if shift {
-                    edits.push(Box::new(|a| a.edit(|e, ph| e.shift(ph, -1))));
-                } else {
-                    transport.push(Key::Comma);
-                }
+                actions.push(if shift { Action::MoveEarlier } else { Action::FrameBack });
             }
             if i.key_pressed(EKey::Period) {
-                if shift {
-                    edits.push(Box::new(|a| a.edit(|e, ph| e.shift(ph, 1))));
-                } else {
-                    transport.push(Key::Period);
-                }
+                actions.push(if shift { Action::MoveLater } else { Action::FrameForward });
             }
             if i.key_pressed(EKey::S) && !command {
-                edits.push(Box::new(|a| a.edit(|e, ph| e.split(ph))));
+                actions.push(Action::Split);
             }
-            if i.key_pressed(EKey::I) {
-                edits.push(Box::new(|a| a.edit(|e, ph| e.trim_to_playhead(true, ph))));
-            }
-            if i.key_pressed(EKey::O) {
-                edits.push(Box::new(|a| a.edit(|e, ph| e.trim_to_playhead(false, ph))));
-            }
-            if i.key_pressed(EKey::D) || i.key_pressed(EKey::Delete) || i.key_pressed(EKey::Backspace) {
-                edits.push(Box::new(|a| a.edit(|e, ph| e.delete(ph))));
+            if i.key_pressed(EKey::D)
+                || i.key_pressed(EKey::Delete)
+                || i.key_pressed(EKey::Backspace)
+            {
+                actions.push(Action::Delete);
             }
             if i.key_pressed(EKey::U) && !command {
-                if shift {
-                    edits.push(Box::new(|a| a.edit(|e, _| e.redo())));
-                } else {
-                    edits.push(Box::new(|a| a.edit(|e, _| e.undo())));
-                }
+                actions.push(if shift { Action::Redo } else { Action::Undo });
             }
             if command && i.key_pressed(EKey::Z) {
-                if shift {
-                    edits.push(Box::new(|a| a.edit(|e, _| e.redo())));
-                } else {
-                    edits.push(Box::new(|a| a.edit(|e, _| e.undo())));
-                }
+                actions.push(if shift { Action::Redo } else { Action::Undo });
             }
             if i.key_pressed(EKey::W) || (command && i.key_pressed(EKey::S)) {
-                edits.push(Box::new(|a| a.save()));
+                actions.push(Action::Save);
             }
-            if i.key_pressed(EKey::T) {
-                edits.push(Box::new(|a| {
-                    let ph = a.state.playhead;
-                    if a.editor.title_add(ph) {
-                        a.editor.end_stage();
-                        a.model_changed();
-                    }
-                }));
-            }
-            if i.key_pressed(EKey::OpenBracket) {
-                transport.push(Key::MarkIn);
-            }
-            if i.key_pressed(EKey::CloseBracket) {
-                transport.push(Key::MarkOut);
-            }
-            if i.key_pressed(EKey::R) {
-                edits.push(Box::new(|a| a.show_render = !a.show_render));
-            }
-            if i.key_pressed(EKey::Escape) {
-                transport.push(Key::ClearMarks);
-                edits.push(Box::new(|a| a.editor.deselect()));
-            }
-            if i.key_pressed(EKey::Q) {
-                edits.push(Box::new(|a| a.request_quit(ctx)));
+            if command && (i.key_pressed(EKey::K) || i.key_pressed(EKey::P)) {
+                actions.push(Action::CommandPalette);
             }
         });
-        for k in transport {
-            let cmds = self.state.on_key(k);
-            self.apply(cmds);
+        for a in actions {
+            self.perform(ctx, a);
         }
-        for f in edits {
-            f(self);
+    }
+
+    /// THE dispatch point. Keyboard, command palette, context menus, and
+    /// the toolbar all end up here, so every surface stays in lockstep —
+    /// that is the discoverability rule made structural.
+    fn perform(&mut self, ctx: &egui::Context, action: Action) {
+        match action {
+            Action::PlayPause => self.transport(Key::Space),
+            Action::ShuttleReverse => self.transport(Key::J),
+            Action::ShuttlePause => self.transport(Key::K),
+            Action::ShuttleForward => self.transport(Key::L),
+            Action::FrameBack => self.transport(Key::Comma),
+            Action::FrameForward => self.transport(Key::Period),
+            Action::NudgeBack => self.transport(Key::SmallLeft),
+            Action::NudgeForward => self.transport(Key::SmallRight),
+            Action::JumpBack => self.transport(Key::Left),
+            Action::JumpForward => self.transport(Key::Right),
+            Action::GoToStart => self.transport(Key::Home),
+            Action::GoToEnd => self.transport(Key::End),
+            Action::PreviousEdge => self.jump_edge(-1),
+            Action::NextEdge => self.jump_edge(1),
+            Action::MarkIn => self.transport(Key::MarkIn),
+            Action::MarkOut => self.transport(Key::MarkOut),
+            Action::ClearMarks => {
+                self.transport(Key::ClearMarks);
+                self.editor.deselect();
+            }
+            Action::Split => self.edit(|e, ph| e.split(ph)),
+            Action::TrimInToPlayhead => self.edit(|e, ph| e.trim_to_playhead(true, ph)),
+            Action::TrimOutToPlayhead => self.edit(|e, ph| e.trim_to_playhead(false, ph)),
+            Action::Delete => self.edit(|e, ph| e.delete(ph)),
+            Action::MoveEarlier => self.edit(|e, ph| e.shift(ph, -1)),
+            Action::MoveLater => self.edit(|e, ph| e.shift(ph, 1)),
+            Action::AddTitle => {
+                let ph = self.state.playhead;
+                if self.editor.title_add(ph) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
+            Action::Undo => self.edit(|e, _| e.undo()),
+            Action::Redo => self.edit(|e, _| e.redo()),
+            Action::Save => self.save(),
+            Action::RenderDialog => self.show_render = !self.show_render,
+            Action::ToggleScopes => {
+                self.scopes_on = !self.scopes_on;
+                self.scope_key = None;
+            }
+            Action::EngineCheckup => self.show_doctor = true,
+            Action::CommandPalette => self.palette.open(),
+            Action::Help => self.transport(Key::Help),
+            Action::Quit => self.request_quit(ctx),
         }
+    }
+
+    fn transport(&mut self, k: Key) {
+        let cmds = self.state.on_key(k);
+        self.apply(cmds);
     }
 
     /// Run an Editor verb at the playhead; rebuild if it changed the model.
@@ -703,10 +724,21 @@ impl GuiApp {
                 self.apply(cmds);
             }
         }
+        // Right-click on the ruler: seek there first, then offer the
+        // playhead and range verbs.
+        if response.secondary_clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let t = map.time_at(pos.x);
+                let cmds = self.state.seek_to(t);
+                self.apply(cmds);
+            }
+        }
+        response.context_menu(|ui| self.ruler_menu(ui));
 
         let painter = ui.painter().clone();
         self.draw_header(&painter, &panel);
         self.help_button(ui, &panel);
+        self.draw_toolbar(ui, &panel);
         let mut y = panel.top() + HEADER_H;
         let ruler_y = y;
         // Marked range band ([ and ]) under the ruler ticks.
@@ -759,6 +791,21 @@ impl GuiApp {
                 if resp.clicked() {
                     self.editor.select_title(i);
                 }
+                if resp.secondary_clicked() {
+                    self.editor.select_title(i);
+                }
+                resp.context_menu(|ui| {
+                    let ctx = ui.ctx().clone();
+                    if ui.button("Delete title\tD").clicked() {
+                        ui.close();
+                        self.perform(&ctx, Action::Delete);
+                    }
+                    ui.label(
+                        egui::RichText::new("text, position, color: inspector →")
+                            .size(10.0)
+                            .color(self.theme.dim),
+                    );
+                });
                 if resp.drag_started() {
                     if let Some(pos) = resp.interact_pointer_pos() {
                         self.editor.select_title(i);
@@ -956,6 +1003,10 @@ impl GuiApp {
         if mid.clicked() {
             self.editor.select_clip(track, index);
         }
+        if mid.secondary_clicked() {
+            self.editor.select_clip(track, index);
+        }
+        mid.context_menu(|ui| self.clip_menu(ui, track));
         if mid.drag_started() {
             self.editor.select_clip(track, index);
             let alt = ui.input(|i| i.modifiers.alt);
@@ -1840,6 +1891,198 @@ impl GuiApp {
         }
     }
 
+    /// Right-click menu for a clip. The clicked clip is already selected;
+    /// entries dispatch through perform() like every other surface.
+    fn clip_menu(&mut self, ui: &mut egui::Ui, track: usize) {
+        let ctx = ui.ctx().clone();
+        let mut chosen: Option<Action> = None;
+        let mut item = |ui: &mut egui::Ui, a: Action| {
+            let text = if a.shortcut().is_empty() {
+                a.label().to_string()
+            } else {
+                format!("{}\t{}", a.label(), a.shortcut())
+            };
+            if ui.button(text).clicked() {
+                chosen = Some(a);
+                ui.close();
+            }
+        };
+        item(ui, Action::Split);
+        item(ui, Action::TrimInToPlayhead);
+        item(ui, Action::TrimOutToPlayhead);
+        item(ui, Action::Delete);
+        if track == 0 {
+            ui.separator();
+            item(ui, Action::MoveEarlier);
+            item(ui, Action::MoveLater);
+        }
+        ui.separator();
+        ui.label(
+            egui::RichText::new("speed, gain, place, color: inspector →")
+                .size(10.0)
+                .color(self.theme.dim),
+        );
+        if let Some(a) = chosen {
+            self.perform(&ctx, a);
+        }
+    }
+
+    /// Right-click menu for the ruler: playhead and range verbs.
+    fn ruler_menu(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let mut chosen: Option<Action> = None;
+        for a in [
+            Action::MarkIn,
+            Action::MarkOut,
+            Action::ClearMarks,
+            Action::AddTitle,
+            Action::Split,
+        ] {
+            let text = if a.shortcut().is_empty() {
+                a.label().to_string()
+            } else {
+                format!("{}\t{}", a.label(), a.shortcut())
+            };
+            if ui.button(text).clicked() {
+                chosen = Some(a);
+                ui.close();
+            }
+        }
+        if let Some(a) = chosen {
+            self.perform(&ctx, a);
+        }
+    }
+
+    /// The small toolbar (discoverability rule): only the verbs everyone
+    /// touches, right-aligned in the timeline header. Everything else is
+    /// one palette or right-click away.
+    fn draw_toolbar(&mut self, ui: &mut egui::Ui, panel: &Rect) {
+        const ITEMS: &[(&str, Action)] = &[
+            ("split", Action::Split),
+            ("delete", Action::Delete),
+            ("undo", Action::Undo),
+            ("redo", Action::Redo),
+            ("save", Action::Save),
+            ("render", Action::RenderDialog),
+            ("⌘ cmds", Action::CommandPalette),
+        ];
+        let mut x = panel.right() - 116.0;
+        let ctx = ui.ctx().clone();
+        for (label, action) in ITEMS.iter().rev() {
+            let w = 7.0 * label.chars().count() as f32 + 16.0;
+            x -= w + 6.0;
+            let rect = Rect::from_min_size(
+                Pos2::new(x, panel.top() + (HEADER_H - 20.0) / 2.0),
+                egui::vec2(w, 20.0),
+            );
+            let response = ui.allocate_rect(rect, Sense::click());
+            let fill = if response.hovered() {
+                self.theme.accent.gamma_multiply(0.30)
+            } else {
+                self.theme.fg.gamma_multiply(0.08)
+            };
+            let painter = ui.painter();
+            painter.rect_filled(rect, 4.0, fill);
+            painter.text(
+                rect.center(),
+                Align2::CENTER_CENTER,
+                *label,
+                FontId::proportional(11.0),
+                self.theme.fg,
+            );
+            let tip = if action.shortcut().is_empty() {
+                action.label().to_string()
+            } else {
+                format!("{} ({})", action.label(), action.shortcut())
+            };
+            if response.on_hover_text(tip).clicked() {
+                self.perform(&ctx, *action);
+            }
+        }
+    }
+
+    /// The command palette: every action, searchable, shortcut shown —
+    /// the 100%-coverage surface of the discoverability rule.
+    fn draw_palette(&mut self, ctx: &egui::Context) {
+        if !self.palette.open {
+            return;
+        }
+        let mut submit: Option<Action> = None;
+        let mut close = false;
+        egui::Window::new("Commands")
+            .title_bar(false)
+            .resizable(false)
+            .anchor(Align2::CENTER_TOP, Vec2::new(0.0, 72.0))
+            .show(ctx, |ui| {
+                ui.set_width(380.0);
+                let edit = egui::TextEdit::singleline(&mut self.palette.query)
+                    .hint_text("Type a command… (try: razor, export, title)")
+                    .desired_width(f32::INFINITY);
+                let response = ui.add(edit);
+                response.request_focus();
+                if response.changed() {
+                    self.palette.selected = 0;
+                }
+                let results = self.palette.results();
+                ui.input(|i| {
+                    if i.key_pressed(egui::Key::ArrowDown) {
+                        self.palette.move_selection(1, results.len());
+                    }
+                    if i.key_pressed(egui::Key::ArrowUp) {
+                        self.palette.move_selection(-1, results.len());
+                    }
+                    if i.key_pressed(egui::Key::Enter) {
+                        submit = self.palette.chosen();
+                    }
+                    if i.key_pressed(egui::Key::Escape) {
+                        close = true;
+                    }
+                });
+                ui.add_space(4.0);
+                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    let sel = self.palette.selected.min(results.len().saturating_sub(1));
+                    for (i, a) in results.iter().enumerate() {
+                        let row = ui.horizontal(|ui| {
+                            let text = if i == sel {
+                                egui::RichText::new(a.label()).color(self.theme.accent)
+                            } else {
+                                egui::RichText::new(a.label())
+                            };
+                            let r = ui.add(
+                                egui::Label::new(text).sense(Sense::click()),
+                            );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        egui::RichText::new(a.shortcut())
+                                            .size(10.0)
+                                            .color(self.theme.dim),
+                                    );
+                                },
+                            );
+                            r
+                        });
+                        if row.inner.clicked() {
+                            submit = Some(*a);
+                        }
+                    }
+                    if results.is_empty() {
+                        ui.label(
+                            egui::RichText::new("nothing matches — the inspector holds the parametric edits")
+                                .color(self.theme.dim),
+                        );
+                    }
+                });
+            });
+        if let Some(a) = submit {
+            self.palette.close();
+            self.perform(ctx, a);
+        } else if close {
+            self.palette.close();
+        }
+    }
+
     fn draw_relink_dialog(&mut self, ctx: &egui::Context) {
         if !self.show_relink {
             return;
@@ -2042,6 +2285,7 @@ impl eframe::App for GuiApp {
         self.draw_render_dialog(ctx);
         self.draw_relink_dialog(ctx);
         self.draw_doctor_dialog(ctx);
+        self.draw_palette(ctx);
         self.draw_quit_confirm(ctx);
     }
 }
