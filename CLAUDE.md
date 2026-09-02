@@ -470,10 +470,12 @@ response is a developer announcement: the official binary prints it
 to stderr and exports it as `VIODE_NOTICE`; the public GUI (left
 panel), TUI (status line), and MCP (initialize instructions) display
 that env var when present — source builds never set it, so the public
-repo stays phone-home-free. Server side, the message comes from
-`viode-message.txt` next to the fastpost binary (override with
-`VIODE_MESSAGE_FILE`): edit the file and every official install shows
-it on next launch; empty or missing file means silence. This is also
+repo stays phone-home-free. Server side (fastpost ships via kamal, so
+no writable files): the message is the body of the post with reserved
+slug `viode-message` on eduardmoldovan.com — kept INACTIVE so it never
+appears on the site, edited in the existing admin, HTML-stripped to
+plain text; no post or empty body means silence
+(`VIODE_MESSAGE_FILE` overrides for local development). This is also
 the migration path to paid: announce in-app for weeks, ship
 key-checking versions, and only flip `valid: false` for versions that
 were told.
