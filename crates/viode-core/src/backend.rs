@@ -103,6 +103,15 @@ fn add_media_clip(
     project_res: [u32; 2],
 ) -> Result<(), RenderError> {
     let path = resolve(project_dir, &clip.src);
+    // A LUT'd clip plays from its ffmpeg bake (frame-identical timeline,
+    // colors applied) instead of the original — see lut.rs for why.
+    let path = if let Some(lut) = &clip.lut {
+        let lut_path = resolve(project_dir, lut);
+        crate::lut::ensure_baked(project_dir, &path, &lut_path)
+            .map_err(|e| RenderError::Gst(e.to_string()))?
+    } else {
+        path
+    };
     let uri = gst::glib::filename_to_uri(&path, None)?;
     let asset = ges::UriClipAsset::request_sync(&uri)?;
     let ges_clip = layer.add_asset(
@@ -165,19 +174,6 @@ fn add_media_clip(
                 grade.hue.unwrap_or(0.0),
             ),
         )?;
-    }
-    if let Some(lut) = &clip.lut {
-        // No stock GStreamer build ships lut3d — say so instead of
-        // failing with a generic "bad effect" (see doctor.rs).
-        if gst::ElementFactory::find("lut3d").is_none() {
-            return Err(RenderError::Gst(
-                ".cube LUTs need a GStreamer 'lut3d' element, which this \
-                 machine's GStreamer build does not provide"
-                    .into(),
-            ));
-        }
-        let lut_path = resolve(project_dir, lut);
-        add_effect(&ges_clip, &format!("lut3d location={}", lut_path.display()))?;
     }
     for desc in &clip.effects {
         let effect = ges::Effect::new(desc)

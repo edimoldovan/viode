@@ -228,10 +228,21 @@ mpv, whisper.cpp) with a user-facing fix string per gap. Parity: CLI
 planning an edit), GUI left-panel banner with an "Engine checkup"
 dialog, TUI status line at launch. Found en route: NO stock GStreamer
 ships a `lut3d` element — the Phase 7 .cube LUT feature never rendered
-anywhere (tests only covered the TOML side). The backend now fails
-actionably (same pattern as pitch); a portable LUT implementation is
-an open decision for Ed (likeliest: bake per-clip LUTs into cached
-intermediates via ffmpeg).
+anywhere (tests only covered the TOML side).
+
+**LUTs baked via ffmpeg (2026-09-02, Ed's call: "they are good at
+their stuff").** `viode_core::lut` bakes the WHOLE source through
+ffmpeg's lut3d filter (tetrahedral interpolation, correct range
+handling) into cache/luts/, near-lossless x264 crf 10 in .mkv with
+audio copied, keyed by source+LUT mtimes; the backend feeds GES the
+bake instead of the original. Whole-file on purpose: SOURCE time stays
+identical, so keyframes/silence/transcripts stay valid and every trim
+reuses one bake — range-baking is the measured optimization if long
+sources ever hurt. Doctor's lut3d check now probes ffmpeg's filter
+instead of the (nonexistent) GStreamer element. The render proof
+Phase 7 lacked exists now: a red clip through a red->blue .cube
+renders blue, asserted on output pixels, plus cache-reuse asserted
+via mtime.
 
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must

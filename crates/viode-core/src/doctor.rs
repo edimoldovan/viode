@@ -105,11 +105,11 @@ pub fn run() -> Vec<Check> {
         },
         Check {
             feature: ".cube LUTs",
-            probe: "lut3d",
-            ok: el("lut3d"),
+            probe: "ffmpeg lut3d filter",
+            ok: ffmpeg_has_filter("lut3d"),
             required: false,
-            fix: "no stock GStreamer build ships a lut3d element today; \
-                  a portable replacement is planned",
+            fix: "this ffmpeg build lacks the lut3d filter — install a \
+                  standard ffmpeg",
         },
         Check {
             feature: "Inline terminal playback",
@@ -137,6 +137,14 @@ pub fn run() -> Vec<Check> {
                   ~/.local/share/viode/models, or set VIODE_WHISPER_MODEL",
         },
     ]
+}
+
+fn ffmpeg_has_filter(name: &str) -> bool {
+    Command::new("ffmpeg")
+        .args(["-hide_banner", "-filters"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&format!(" {name} ")))
+        .unwrap_or(false)
 }
 
 fn whisper_model_present() -> bool {

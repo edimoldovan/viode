@@ -7,6 +7,7 @@ pub mod backend;
 pub mod doctor;
 pub mod export;
 pub mod hwaccel;
+pub mod lut;
 pub mod media;
 pub mod model;
 pub mod ops;

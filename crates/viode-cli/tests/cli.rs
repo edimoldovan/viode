@@ -916,3 +916,83 @@ fn doctor_reports_the_machine_and_fails_without_core_deps() {
         .stdout(predicate::str::contains("MISS"))
         .stderr(predicate::str::contains("core dependencies are missing"));
 }
+
+#[test]
+fn lut_bake_changes_rendered_colors() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP lut test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+
+    // A solid red clip and a .cube LUT that swaps red and blue.
+    let red = tmp.path().join("red.mp4");
+    let status = Proc::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=red:duration=1:size=320x180:rate=30",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            "-c:a", "aac", "-shortest",
+        ])
+        .arg(&red)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    let cube = tmp.path().join("swap.cube");
+    let mut lut = String::from("LUT_3D_SIZE 2\n");
+    for b in 0..2 {
+        for g in 0..2 {
+            for r in 0..2 {
+                lut.push_str(&format!("{b}.0 {g}.0 {r}.0\n")); // out rgb = in bgr
+            }
+        }
+    }
+    std::fs::write(&cube, lut).unwrap();
+
+    viode(tmp.path()).args(["new", "look"]).assert().success();
+    let proj = tmp.path().join("look");
+    viode(&proj).args(["add", "../red.mp4"]).assert().success();
+    viode(&proj)
+        .args(["color", "0", "--lut", "../swap.cube"])
+        .assert()
+        .success();
+
+    if !ges_available() {
+        eprintln!("SKIP lut render check: GES not installed");
+        return;
+    }
+    viode(&proj).arg("render").assert().success();
+
+    // The bake exists exactly once in the project cache...
+    let bakes: Vec<_> = std::fs::read_dir(proj.join("cache/luts"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "mkv"))
+        .collect();
+    assert_eq!(bakes.len(), 1, "expected one cached bake");
+
+    // ...and the red source really rendered blue: sample the mid frame as
+    // one rgb24 pixel.
+    let out = Proc::new("ffmpeg")
+        .args(["-loglevel", "error", "-ss", "0.5", "-i"])
+        .arg(proj.join("renders/look.mp4"))
+        .args(["-frames:v", "1", "-vf", "scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let px = &out.stdout[..3];
+    assert!(
+        px[2] > 180 && px[0] < 80,
+        "LUT did not land in the render: got rgb {px:?}, expected blue"
+    );
+
+    // A second render reuses the cache instead of re-baking.
+    let mtime = std::fs::metadata(bakes[0].path()).unwrap().modified().unwrap();
+    viode(&proj).arg("render").assert().success();
+    assert_eq!(
+        std::fs::metadata(bakes[0].path()).unwrap().modified().unwrap(),
+        mtime,
+        "second render should not re-bake"
+    );
+}

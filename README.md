@@ -289,7 +289,7 @@ viode take <track> <start> <end>                cut to an angle for a timeline r
 viode transcribe <i> [--model M]                whisper.cpp transcript (timed segments)
 viode cut-text <i> <from> <to>                  cut transcript segments out of the video
 viode place <i> --x --y --scale --opacity       picture-in-picture, layouts, rotation
-viode color <i> --saturation ... [--lut f.cube] color grade / LUT
+viode color <i> --saturation ... [--lut f.cube] color grade / LUT (baked via ffmpeg, cached)
 viode scope <i> [--kind waveform|vector]        colorist's instruments (PNG)
 viode speed <i> <rate>                          2 = fast, 0.5 = slow motion
 viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preserved)
