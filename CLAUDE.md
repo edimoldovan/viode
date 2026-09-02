@@ -232,6 +232,14 @@ Ed's Mac with this session's 1.5-hour film: picture, moving timecode,
 keyed by pixel width, so a window resize on a long film blanks the
 lanes for ~20 s while ffmpeg regenerates them.
 
+**GES encoder default (2026-09-02).** The master render profile now
+names x264enc unless VIODE_HWACCEL opts into hardware — the encoder the
+doctor checks for. Reason: on brew Macs vtenc_h264 ties x264enc on
+rank and wins, and under concurrent renders (the parallel test suite)
+VideoToolbox emitted buffers without timestamps, failing mp4mux with
+"Buffer has no PTS" in a different random test each run. Serial runs
+never showed it. With x264enc named, the CLI suite is green repeatedly.
+
 **`viode doctor` (2026-09-02) — done.** `viode_core::doctor` probes
 every engine piece (GStreamer elements per feature, ffmpeg/ffprobe,
 mpv, whisper.cpp) with a user-facing fix string per gap. Parity: CLI

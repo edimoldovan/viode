@@ -446,9 +446,15 @@ impl RenderBackend for GesBackend {
         let h264_caps = gst::Caps::builder("video/x-h264").build();
         let mut video_builder = gst_pbutils::EncodingVideoProfile::builder(&h264_caps);
         // Opt-B: force a hardware encoder by factory name when asked.
-        if let Some(hw) = crate::hwaccel::from_env() {
-            video_builder = video_builder.preset_name(hw.ges_encoder);
-        }
+        // Software x264 by default, exactly what the doctor checks for;
+        // hardware encoders are opt-in through VIODE_HWACCEL. Left to
+        // rank alone, Homebrew's VideoToolbox encoder wins the tie on
+        // macOS and emits timestamp-less buffers once several renders
+        // run at once (mp4mux: "Buffer has no PTS").
+        video_builder = match crate::hwaccel::from_env() {
+            Some(hw) => video_builder.preset_name(hw.ges_encoder),
+            None => video_builder.preset_name("x264enc"),
+        };
         let video_profile = video_builder.build();
         let audio_profile = gst_pbutils::EncodingAudioProfile::builder(
             &gst::Caps::builder("audio/mpeg")

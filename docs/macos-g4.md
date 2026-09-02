@@ -73,9 +73,12 @@ GST_DEBUG). The measured verdict on this machine, 30s of 4K60
 Big Buck Bunny to a 540p proxy: software 1.8s, VideoToolbox 7.3s —
 **software wins 4.0x, leave VIODE_HWACCEL unset on the M5 Max**. Same
 rule as Linux: the hardware path exists, is one export away, and stays
-off without a local win. (For GES renders the point is moot anyway:
-Homebrew's vtenc_h264 ranks primary, so encodebin picks VideoToolbox
-by default there.)
+off without a local win. GES renders follow the same rule since
+2026-09-02: the encoding profile names x264enc unless VIODE_HWACCEL asks
+for hardware. Left to rank, Homebrew's vtenc_h264 ties x264enc and wins
+the tie, and under several concurrent renders it emitted buffers with
+no timestamps (mp4mux: "Buffer has no PTS"), which made random render
+tests fail in the parallel suite on this Mac.
 
 Step 2 — exercising the whole surface (playback, JKL, scrubbing, edits,
 inspector, angles, transcript, scopes, render dialog, relink) is Ed's
