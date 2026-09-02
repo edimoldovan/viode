@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/edimoldovan/viode/actions/workflows/ci.yml/badge.svg)](https://github.com/edimoldovan/viode/actions/workflows/ci.yml)
 
+**Website: [eduardmoldovan.com/viode](https://eduardmoldovan.com/viode)** — what Viode is, what it automates, and how to hear about the launch.
+
 ## **The mission: get Lex Fridman off macOS/Windows.**
 
 Ask anyone who's tried to leave Mac or Windows what's holding them back and
