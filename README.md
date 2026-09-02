@@ -258,9 +258,9 @@ The window itself (egui) is laid out like an
 NLE: the preview dominates, and the timeline docks below it with a
 prominent timecode, track headers on the left (V1/A1 style; video lanes
 stack above V1, audio lanes below A1), real filmstrips and waveforms, and
-titles as markers. Colors follow the Omarchy theme — the GUI reads the
-same terminal palette the TUI inherits, so it matches your desktop (and
-falls back to a neutral dark theme elsewhere). The preview is the
+titles as markers. Colors follow the Omarchy theme LIVE — switch themes
+and the whole window recolors within a second, like the rest of the
+desktop (elsewhere it falls back to a neutral dark look). The preview is the
 same GES timeline the renderer uses, streamed frame-by-frame into the
 window, so transitions, titles, transforms, and keyframes all play exactly
 as they will render. Transport follows the editor grammar: `space`
@@ -507,7 +507,13 @@ and the edit assembles itself in the window while the model works.
 | 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
 | 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
 | 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth, live preview | ✅ |
-| 8 | The GUI (egui) — G1 viewer ✅, G2 editing parity ✅, G3 pro surface (multicam takes, transcript editing, scopes, render dialog, relink) ✅, next: G4 macOS | ⏳ |
+| 8 | The GUI (egui): viewer, full editing parity, the pro surface, macOS | ✅ |
+| 9 | `viode doctor` + engine capability policy, `viode connect` (one command into Claude/Cursor/opencode/...) | ✅ |
+| 10 | Discoverability: command palette, context menus, toolbar — every verb mouse-reachable | ✅ |
+| 11 | The creator wave: freeze, ramp, steady, captions, subject-aware reframe | ✅ |
+| 12 | The podcast wave: markers, ducking, voice cleanup, music refit, the angle wall | ✅ |
+| 13 | The craft wave: keyframed motion, chroma key, shot match + gamma, nested projects, jump-cut morph, tracking masks | ✅ |
+| 14 | Distribution: packages and installers for Linux and macOS | ⏳ |
 
 ## Development
 
