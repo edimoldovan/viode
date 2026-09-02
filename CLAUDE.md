@@ -238,6 +238,18 @@ at 1.90.0 to match the gstreamer-rs 0.24 pin. Linux installs the
 GStreamer dev stack incl. GES from apt; macOS installs the Homebrew
 gstreamer monorepo formula — a green macOS job is also the answer to
 the "does brew ship GES" packaging risk. README carries the badge.
+First run found two platform truths: Homebrew's GStreamer ships
+WITHOUT soundtouch, so the `pitch` element is missing and speed-change
+renders fail on every brew Mac (backend now pre-checks and names the
+missing plugin; the phase 7 test self-skips that check; the notarized
+.app must bundle soundtouch — decide the brew-tap story in the
+distribution phase). And the keyframe fade-out threshold is platform-
+sensitive (Arch ~18 dB, Ubuntu 24.04 ~12 dB); the test now asserts
+the 10 dB invariant instead. Policy going forward: engine capability
+varies with how the platform built GStreamer, so viode pre-checks
+optional elements and errors actionably, official bundles ship a
+complete GStreamer we control, and CI runs on the weakest
+environment (brew) so gaps surface before users see them.
 
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
 users must be able to install on Linux, macOS, and Windows. Windows is

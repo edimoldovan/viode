@@ -115,6 +115,15 @@ fn add_media_clip(
     // Speed: videorate/pitch are GES time effects — they change how much
     // source the (already rate-scaled) timeline duration consumes.
     if let Some(r) = clip.rate.filter(|r| *r > 0.0 && *r != 1.0) {
+        // Homebrew's GStreamer ships without soundtouch, so name the fix
+        // instead of failing with a generic "bad effect".
+        if gst::ElementFactory::find("pitch").is_none() {
+            return Err(RenderError::Gst(
+                "speed changes need the GStreamer 'pitch' element (soundtouch plugin, \
+                 part of gst-plugins-bad), which is not installed on this machine"
+                    .into(),
+            ));
+        }
         add_effect(&ges_clip, &format!("videorate rate={r}"))?;
         add_effect(&ges_clip, &format!("pitch tempo={r}"))?;
     }
