@@ -474,8 +474,8 @@ repo stays phone-home-free. Server side (fastpost ships via kamal, so
 no writable files): the message is the body of the post with reserved
 slug `viode-message` on eduardmoldovan.com — kept INACTIVE so it never
 appears on the site, edited in the existing admin, HTML-stripped to
-plain text; no post or empty body means silence
-(`VIODE_MESSAGE_FILE` overrides for local development). This is also
+plain text; no post or empty body means silence. To test locally,
+edit the post in the local database. This is also
 the migration path to paid: announce in-app for weeks, ship
 key-checking versions, and only flip `valid: false` for versions that
 were told.
