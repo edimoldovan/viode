@@ -225,9 +225,10 @@ already be feature-rich for a broad audience. Order: discoverability
 foundation (palette, context menus, toolbar over existing verbs) ->
 creator wave -> podcast wave -> payment plumbing (checkout, key
 issuance, real license policy) -> distribution and launch. Craft and
-depth waves follow post-launch. Carve-out: the CI half of the release
-spine (GitHub Actions building and testing on Linux and macOS) still
-happens early — only user-facing packaging waits. This supersedes the
+depth waves follow post-launch. Carve-out, confirmed by Ed: the CI
+half of the release spine (GitHub Actions building and testing on
+Linux and macOS) is stage 0, the immediate next work — only
+user-facing packaging waits. This supersedes the
 Phase 9 ordering below; details in the local-only PLAN.md.
 
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
