@@ -125,6 +125,12 @@ and dropped it into `~/.local/share/gstreamer-1.0/plugins/`. Everything
 else worked unmodified. Full log and fixes:
 [docs/macos-bootstrap.md](docs/macos-bootstrap.md).
 
+A second Homebrew gap: the core `ffmpeg` formula no longer links
+libvidstab, so `viode steady` needs the community build:
+`brew tap homebrew-ffmpeg/ffmpeg && brew install
+homebrew-ffmpeg/ffmpeg/ffmpeg --with-libvidstab` (uninstall the core
+formula first). `viode doctor` says exactly this when it finds the gap.
+
 ## Install
 
 Requirements (Arch package names; any distro works with equivalents):

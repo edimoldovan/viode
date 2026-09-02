@@ -130,7 +130,9 @@ pub fn run() -> Vec<Check> {
             ok: ffmpeg_has_filter("vidstabdetect"),
             required: false,
             fix: "install ffmpeg built with libvidstab (Arch ffmpeg has it; \
-                  Homebrew: brew install ffmpeg)",
+                  Homebrew's core formula dropped it, so use the community \
+                  tap: brew tap homebrew-ffmpeg/ffmpeg && brew install \
+                  homebrew-ffmpeg/ffmpeg/ffmpeg --with-libvidstab)",
         },
         Check {
             feature: ".cube LUTs",

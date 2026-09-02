@@ -433,6 +433,18 @@ platform-exclusive dependency. Cloud collaboration, AE dynamic link,
 and 360/VR are deliberately excluded. If PLAN.md is not on this
 machine, ask Ed for it before starting countdown work.
 
+**Homebrew platform truth (2026-09-02).** Homebrew's core `ffmpeg`
+formula (9.x) no longer links libvidstab, so a stock brew Mac fails the
+stabilization check and `brew install ffmpeg` cannot fix it. The doctor
+hint now points at the community tap: `brew tap homebrew-ffmpeg/ffmpeg
+&& brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libvidstab` (same
+9.0.1 version, so gstreamer and mpv keep their library links; the core
+formula must be uninstalled first because both are named `ffmpeg`).
+Ed's Mac runs that build and passes all 19 checks; the notarized .app
+bundle must ship an ffmpeg with vidstab too. whisper.cpp comes from
+`brew install whisper-cpp` (binary `whisper-cli`), and the models live
+in ~/.local/share/viode/models exactly as the doctor hints say.
+
 **Doctor rule (2026-09-02, binding).** A verb that adds an engine
 dependency (a GStreamer element, an ffmpeg filter, a sidecar binary,
 a model file) ships its doctor check in the same phase — exactly like
