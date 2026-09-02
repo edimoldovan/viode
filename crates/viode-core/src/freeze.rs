@@ -47,20 +47,38 @@ pub fn build_still(
     }
     std::fs::create_dir_all(dest.parent().unwrap())?;
     let secs = dur.0 as f64 / 1e9;
+    // Two steps on purpose: extract the frame as a PNG, then loop the
+    // image. Looping a one-frame H.264 stream with the loop filter
+    // produces files some GStreamer builds refuse ("no valid frames
+    // decoded"); the image2 path is bulletproof everywhere.
+    let png = dest.with_extension("png");
     let out = Command::new("ffmpeg")
         .args(["-y", "-loglevel", "error"])
         .args(["-ss", &format!("{}", at_src.0 as f64 / 1e9)])
         .arg("-i")
         .arg(src_abs)
-        .args(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
         .args(["-frames:v", "1"])
-        .args(["-vf", &format!("scale={}:{},loop=-1:1", res[0], res[1])])
+        .args(["-vf", &format!("scale={}:{}", res[0], res[1])])
+        .arg(&png)
+        .output()?;
+    if !out.status.success() || !png.exists() {
+        return Err(FreezeError::Ffmpeg(
+            src_abs.display().to_string(),
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    let out = Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error"])
+        .args(["-loop", "1", "-framerate", &format!("{fps}")])
+        .arg("-i")
+        .arg(&png)
+        .args(["-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000"])
         .args(["-t", &format!("{secs}")])
-        .args(["-r", &format!("{fps}")])
         .args(["-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p"])
         .args(["-c:a", "aac", "-shortest"])
         .arg(&dest)
         .output()?;
+    let _ = std::fs::remove_file(&png);
     if !out.status.success() {
         let _ = std::fs::remove_file(&dest);
         return Err(FreezeError::Ffmpeg(
