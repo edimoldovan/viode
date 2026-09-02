@@ -131,6 +131,11 @@ libvidstab, so `viode steady` needs the community build:
 homebrew-ffmpeg/ffmpeg/ffmpeg --with-libvidstab` (uninstall the core
 formula first). `viode doctor` says exactly this when it finds the gap.
 
+On macOS the GUI renders through wgpu (Metal). macOS 26.6 stopped
+presenting eframe's OpenGL window after its first frames — the editor
+kept running but the screen froze — and Metal is the supported path on
+Apple hardware anyway. Linux keeps the OpenGL renderer.
+
 ## Install
 
 Requirements (Arch package names; any distro works with equivalents):

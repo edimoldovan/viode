@@ -219,6 +219,19 @@ stays unset there. Ed exercised the GUI surface on the Mac and called
 it done. Phase 8 is complete on both platforms; packaging remains
 deferred by Ed's call and is the only G4 leftover.
 
+**macOS renderer (2026-09-02).** On macOS 26.6 eframe's OpenGL (glow)
+window stops being presented a few seconds after launch: the app keeps
+painting at full rate, playback runs, frames reach the texture, but the
+screen shows a frozen early frame (black preview, timecode stuck at
+zero). The August 31 baseline shows the same freeze, so it is the OS
+update, not a Viode change. The GUI now renders through wgpu (Metal)
+on macOS and keeps glow on Linux — one `renderer` choice in
+viode-gui/src/lib.rs, eframe's `wgpu` feature enabled. Verified on
+Ed's Mac with this session's 1.5-hour film: picture, moving timecode,
+70 seconds of playback. Known and pre-existing: lane filmstrips are
+keyed by pixel width, so a window resize on a long film blanks the
+lanes for ~20 s while ffmpeg regenerates them.
+
 **`viode doctor` (2026-09-02) — done.** `viode_core::doctor` probes
 every engine piece (GStreamer elements per feature, ffmpeg/ffprobe,
 mpv, whisper.cpp) with a user-facing fix string per gap. Parity: CLI

@@ -7,7 +7,7 @@ license-file.workspace = true
 [dependencies]
 viode-core = { path = "../viode-core" }
 anyhow.workspace = true
-eframe = "0.32"
+eframe = { version = "0.32", features = ["wgpu"] }
 toml.workspace = true
 serde_json.workspace = true
 gstreamer.workspace = true

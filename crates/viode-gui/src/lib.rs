@@ -85,6 +85,15 @@ fn run_app(
         // compositor declares the app unresponsive. We pace repaints
         // ourselves, so vsync buys nothing — keep it off.
         vsync: false,
+        // macOS 26.6 stopped presenting eframe's OpenGL (CGL) window after
+        // the first few frames: the app kept painting at full rate, the
+        // window on screen froze. Metal through wgpu presents correctly, so
+        // the Mac renders with wgpu; Linux keeps glow, which is proven there.
+        renderer: if cfg!(target_os = "macos") {
+            eframe::Renderer::Wgpu
+        } else {
+            eframe::Renderer::Glow
+        },
         ..Default::default()
     };
     eframe::run_native(

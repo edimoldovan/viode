@@ -88,3 +88,18 @@ stable, per the order of work.
 Every fix ships with a test or a bootstrap-doc entry, `cargo test`
 stays green on both platforms, and nothing lands that makes Linux
 worse.
+
+## Follow-up (2026-09-02): the window froze on macOS 26.6
+
+After the macOS 26.6 update the editor window stopped updating a few
+seconds after launch. Diagnosis on the M5 Max: the GES preview
+delivered picture frames, egui repainted at about 90 updates per
+second, the texture carried the frames, and playback position
+advanced — yet the on-screen window kept an early frame (black
+preview, timecode at zero). The August 31 baseline binary froze the
+same way, which cleared Viode's own changes; eframe's glow (CGL)
+backend logged no error, it simply stopped presenting. Switching the
+renderer to wgpu (Metal) fixed it outright: picture, moving timecode,
+70 seconds of playback verified. The renderer is chosen per platform
+in `viode-gui/src/lib.rs`; Linux keeps glow.
+
