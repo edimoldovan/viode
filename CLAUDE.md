@@ -287,6 +287,30 @@ four interfaces, doctor checks in-phase per the rules:
   --reframe` in CLI/MCP/GUI render dialog. Verified end to end on
   this machine (real 1080x1920 output).
 
+**The podcast wave (stage 3) — done (2026-09-02).** Five items:
+- `mark` — Project.markers (at/text/color) in the model; CLI
+  mark/marks, MCP mark_add/mark_remove + markers in the timeline
+  JSON, GUI ruler diamonds (click seeks, right-click removes, `M`
+  adds) and TUI `m` + ruler glyphs.
+- `duck` — no sidechain: core::duck turns the cached main-track
+  loudness analysis into a timeline speech mask (pure, unit-tested)
+  and writes ramped volume keyframes onto the music track's clips.
+  Rerunning re-plans (volume keys replaced, other props kept). CLI
+  duck, MCP duck, GUI palette action with worker-thread analysis.
+- `clean` — Clip.clean (afftdn nr dB): audio-only bake (video
+  stream-copied, FLAC audio) in cache/clean, chained
+  steady->clean->lut. Doctor checks afftdn. CLI/MCP clean_set/GUI
+  inspector checkbox.
+- `refit` — core::refit: pure seam planner over loudness windows
+  (quietest pair bounds the cut/repeat span; shorten to half,
+  stretch to double), applied as two overlapping overlay clips —
+  GES auto-transition renders the seam as a crossfade. Overlay
+  tracks only by design. CLI refit, MCP refit, GUI inspector row.
+- Angle wall — the GUI angle list shows each angle's frame AT the
+  playhead (1s-bucketed pseudo-clips through the shared artifact
+  cache) and number keys 1-9 take that angle over the range; click
+  still takes.
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

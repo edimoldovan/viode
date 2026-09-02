@@ -136,6 +136,55 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         track: usize,
     },
+    /// Retime a music overlay clip to a target duration with an
+    /// invisible crossfaded seam at the quietest point
+    Refit {
+        /// Overlay track holding the music
+        track: usize,
+        /// Clip index on that track
+        index: usize,
+        /// Target duration, e.g. 90 or 01:30
+        #[arg(long)]
+        to: String,
+        /// Crossfade at the seam, seconds
+        #[arg(long, default_value_t = 0.5)]
+        fade: f64,
+    },
+    /// Clean up a clip's voice audio (denoise + rumble cut; --off clears)
+    Clean {
+        index: usize,
+        /// Noise reduction in dB (afftdn nr)
+        #[arg(long, default_value_t = 12.0)]
+        strength: f64,
+        #[arg(long)]
+        off: bool,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Duck music under dialogue: volume keyframes on an overlay track,
+    /// planned from the main track's loudness analysis
+    Duck {
+        /// The music/overlay track to duck (see `viode track ls`)
+        track: usize,
+        /// Ducked volume as a fraction of the clip's own volume
+        #[arg(long, default_value_t = 0.25)]
+        amount: f64,
+        /// Speech threshold in RMS dBFS
+        #[arg(long, default_value_t = -35.0, allow_negative_numbers = true)]
+        threshold: f64,
+    },
+    /// Add a marker at a timeline time (a named note; never renders)
+    Mark {
+        /// Timeline time, e.g. 1.5 or 00:01:30 (omit with --rm)
+        at: Option<String>,
+        /// Marker text
+        text: Vec<String>,
+        /// Remove marker by index (see `viode marks`)
+        #[arg(long)]
+        rm: Option<usize>,
+    },
+    /// List markers
+    Marks,
     /// Stabilize a clip's footage (vidstab bake; --off clears)
     Steady {
         index: usize,
@@ -576,6 +625,96 @@ pub fn run() -> Result<()> {
             println!("clip {index} rate {rate} (timeline length {})", c.len());
             Ok(())
         }),
+        Cmd::Refit { track, index, to, fade } => {
+            let project_dir = cli
+                .project
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            with_project(&cli.project, |p| {
+                let target = Time::parse(&to)?;
+                let fade = Time::from_secs_f64(fade)?;
+                let plan =
+                    viode_core::refit::refit(p, &project_dir, track, index, target, fade)?;
+                match plan {
+                    viode_core::refit::RefitPlan::Cut { from, to } => {
+                        println!("refit: cut source {from} - {to}, crossfaded seam")
+                    }
+                    viode_core::refit::RefitPlan::Repeat { from, to } => {
+                        println!("refit: repeated source {from} - {to}, crossfaded seam")
+                    }
+                }
+                Ok(())
+            })
+        }
+        Cmd::Clean { index, strength, off, track } => with_project(&cli.project, |p| {
+            if !off && !(0.01..=97.0).contains(&strength) {
+                bail!("strength {strength} out of range (0.01..=97 dB)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.clean = (!off).then_some(strength);
+            println!(
+                "clip {index} audio cleanup {}",
+                if off { "off".to_string() } else { format!("on ({strength} dB)") }
+            );
+            Ok(())
+        }),
+        Cmd::Duck { track, amount, threshold } => {
+            let project_dir = cli
+                .project
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            with_project(&cli.project, |p| {
+                if !(0.0..=1.0).contains(&amount) {
+                    bail!("amount {amount} out of range [0, 1]");
+                }
+                let opts = viode_core::duck::DuckOptions {
+                    amount,
+                    threshold_db: threshold,
+                    ..Default::default()
+                };
+                let ducks = viode_core::duck::duck(p, &project_dir, track, &opts)?;
+                println!(
+                    "ducked track {track} under {ducks} speech window(s) \
+                     (volume keyframes — inspect with `viode keys`)"
+                );
+                Ok(())
+            })
+        }
+        Cmd::Mark { at, text, rm } => with_project(&cli.project, |p| {
+            if let Some(i) = rm {
+                if i >= p.markers.len() {
+                    bail!("marker {i} out of range ({} markers)", p.markers.len());
+                }
+                let m = p.markers.remove(i);
+                println!("removed marker {i} ({} {:?})", m.at, m.text);
+                return Ok(());
+            }
+            let at = Time::parse(at.as_deref().context("give a time, or --rm <i>")?)?;
+            let text = if text.is_empty() {
+                format!("marker {}", p.markers.len())
+            } else {
+                text.join(" ")
+            };
+            p.markers.push(viode_core::Marker { at, text: text.clone(), color: None });
+            p.markers.sort_by_key(|m| m.at.0);
+            println!("marker at {at}: {text}");
+            Ok(())
+        }),
+        Cmd::Marks => {
+            let p = Project::load(&cli.project)?;
+            if p.markers.is_empty() {
+                println!("no markers (add with `viode mark <time> <text>`)");
+            }
+            for (i, m) in p.markers.iter().enumerate() {
+                println!("[{i:>3}] {}  {}", m.at, m.text);
+            }
+            Ok(())
+        }
         Cmd::Steady { index, smoothing, off, track } => with_project(&cli.project, |p| {
             if !off && !viode_core::steady::vidstab_available() {
                 bail!(

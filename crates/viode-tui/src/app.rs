@@ -232,6 +232,7 @@ impl App {
             KeyCode::Char('s') => self.split(),
             KeyCode::Char('d') => self.delete(),
             KeyCode::Char('f') => self.freeze(),
+            KeyCode::Char('m') => self.mark(),
             KeyCode::Char('i') => self.trim_in(),
             KeyCode::Char('o') => self.trim_out(),
             KeyCode::Char('<') => self.shift(-1),
@@ -329,6 +330,19 @@ impl App {
                 self.message = e.to_string();
             }
         }
+    }
+
+    /// Drop a marker at the playhead (rename or remove via the CLI).
+    fn mark(&mut self) {
+        self.snapshot();
+        let n = self.project.markers.len();
+        self.project.markers.push(viode_core::Marker {
+            at: self.playhead,
+            text: format!("marker {n}"),
+            color: None,
+        });
+        self.project.markers.sort_by_key(|m| m.at.0);
+        self.message = format!("marker at {}", self.playhead);
     }
 
     fn delete(&mut self) {
@@ -613,19 +627,33 @@ mod tests {
         a.playhead = t(1.0);
         a.on_key(KeyCode::Char('s'));
         assert_eq!(a.project.main().clips.len(), 3);
-
-        // Freeze off the end of the timeline refuses with a clear message
-        // and leaves the timeline untouched.
-        let clips_before = a.project.main().clips.len();
-        a.playhead = t(999.0);
-        a.on_key(KeyCode::Char('f'));
-        assert!(a.message.contains("nothing under the playhead"), "{}", a.message);
-        assert_eq!(a.project.main().clips.len(), clips_before);
         assert!(a.dirty);
         a.on_key(KeyCode::Char('u'));
         assert_eq!(a.project.main().clips.len(), 2, "undo restores");
         a.on_key(KeyCode::Char('U'));
         assert_eq!(a.project.main().clips.len(), 3, "redo reapplies");
+    }
+
+    #[test]
+    fn freeze_refuses_off_the_timeline() {
+        let mut a = app();
+        a.playhead = t(999.0);
+        a.on_key(KeyCode::Char('f'));
+        assert!(a.message.contains("nothing under the playhead"), "{}", a.message);
+        assert_eq!(a.project.main().clips.len(), 2);
+    }
+
+    #[test]
+    fn markers_land_sorted_and_undo() {
+        let mut a = app();
+        a.playhead = t(1.0);
+        a.on_key(KeyCode::Char('m'));
+        a.playhead = t(0.25);
+        a.on_key(KeyCode::Char('m'));
+        assert_eq!(a.project.markers.len(), 2);
+        assert!(a.project.markers[0].at < a.project.markers[1].at);
+        a.on_key(KeyCode::Char('u'));
+        assert_eq!(a.project.markers.len(), 1);
     }
 
     #[test]

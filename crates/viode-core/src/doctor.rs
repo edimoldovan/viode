@@ -104,6 +104,13 @@ pub fn run() -> Vec<Check> {
             fix: "install gst-plugins-good (the smpte plugin)",
         },
         Check {
+            feature: "Voice cleanup",
+            probe: "ffmpeg afftdn",
+            ok: ffmpeg_has_filter("afftdn"),
+            required: false,
+            fix: "install a standard ffmpeg (afftdn ships in every stock build)",
+        },
+        Check {
             feature: "Stabilization",
             probe: "ffmpeg vidstab",
             ok: ffmpeg_has_filter("vidstabdetect"),

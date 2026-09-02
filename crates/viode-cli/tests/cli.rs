@@ -1152,3 +1152,66 @@ fn reframe_produces_a_vertical_short_or_names_the_missing_model() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "1080,1920");
 }
+
+#[test]
+fn clean_bakes_audio_and_renders() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP clean test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("noisy.mp4"), 2.0);
+    viode(tmp.path()).args(["new", "voice"]).assert().success();
+    let proj = tmp.path().join("voice");
+    viode(&proj).args(["add", "../noisy.mp4"]).assert().success();
+    viode(&proj)
+        .args(["clean", "0", "--strength", "20"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("on (20 dB)"));
+
+    if !ges_available() {
+        eprintln!("SKIP clean render: GES not installed");
+        return;
+    }
+    viode(&proj).arg("render").assert().success();
+    let bakes = std::fs::read_dir(proj.join("cache/clean"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "mkv"))
+        .count();
+    assert_eq!(bakes, 1, "expected one cached audio bake");
+    let dur = probe_duration(&proj.join("renders/voice.mp4"));
+    assert!((dur - 2.0).abs() < 0.3, "cleanup keeps duration, got {dur}");
+}
+
+#[test]
+fn markers_roundtrip_through_the_cli() {
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "notes"]).assert().success();
+    let proj = tmp.path().join("notes");
+
+    viode(&proj).args(["mark", "1.5", "chapter", "one"]).assert().success();
+    viode(&proj).args(["mark", "0.5"]).assert().success();
+    viode(&proj)
+        .arg("marks")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("chapter one"));
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    assert_eq!(toml.matches("[[marker]]").count(), 2, "{toml}");
+    // Sorted: the 0.5s marker lists first.
+    assert!(toml.find("0.500").unwrap() < toml.find("1.500").unwrap());
+
+    viode(&proj).args(["mark", "--rm", "0"]).assert().success();
+    viode(&proj)
+        .arg("marks")
+        .assert()
+        .stdout(predicate::str::contains("chapter one"));
+    // Out-of-range removal is a helpful error.
+    viode(&proj)
+        .args(["mark", "--rm", "9"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("out of range"));
+}

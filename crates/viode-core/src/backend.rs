@@ -112,6 +112,12 @@ fn add_media_clip(
     } else {
         path
     };
+    let path = if let Some(strength) = clip.clean {
+        crate::clean::ensure_baked(project_dir, &path, strength)
+            .map_err(|e| RenderError::Gst(e.to_string()))?
+    } else {
+        path
+    };
     // A LUT'd clip plays from its ffmpeg bake (frame-identical timeline,
     // colors applied) instead of the original — see lut.rs for why.
     let path = if let Some(lut) = &clip.lut {

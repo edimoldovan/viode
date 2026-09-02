@@ -187,6 +187,61 @@ pub fn definitions() -> Vec<Value> {
             &["index"],
         ),
         tool(
+            "refit",
+            "Retime a music overlay clip to a target duration: one seam \
+             at the quietest point, rendered as a crossfade. Shortens to \
+             half or stretches to double.",
+            json!({
+                "track": {"type": "integer"},
+                "index": {"type": "integer"},
+                "to": {"type": "string", "description": "target duration"},
+                "fade": {"type": "number", "default": 0.5},
+            }),
+            &["track", "index", "to"],
+        ),
+        tool(
+            "clean_set",
+            "Voice cleanup on a clip: rumble highpass + FFT denoise \
+             (ffmpeg afftdn), baked and cached audio-only. strength = \
+             noise reduction in dB (~12 light, ~30 aggressive); on:false \
+             clears.",
+            json!({
+                "index": {"type": "integer"},
+                "strength": {"type": "number", "default": 12.0},
+                "on": {"type": "boolean", "default": true},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index"],
+        ),
+        tool(
+            "duck",
+            "Duck music under dialogue: writes volume keyframes onto an \
+             overlay track's clips wherever the main track carries speech \
+             (from the cached loudness analysis). Rerunning re-plans.",
+            json!({
+                "track": {"type": "integer"},
+                "amount": {"type": "number", "default": 0.25},
+                "threshold": {"type": "number", "default": -35.0},
+            }),
+            &["track"],
+        ),
+        tool(
+            "mark_add",
+            "Add a named marker at a timeline time (a note; never renders).",
+            json!({
+                "at": {"type": "string", "description": "timeline time"},
+                "text": {"type": "string"},
+                "color": {"type": "string", "description": "#RRGGBB"},
+            }),
+            &["at", "text"],
+        ),
+        tool(
+            "mark_remove",
+            "Remove a marker by index (see the timeline JSON's markers list).",
+            json!({ "index": {"type": "integer"} }),
+            &["index"],
+        ),
+        tool(
             "captions",
             "Generate captions for the whole timeline from local \
              transcription (cached per source file). srt writes a sidecar \
@@ -702,6 +757,66 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             }
             Ok(())
         }),
+        "refit" => {
+            let (_, dir) = require_project(server)?;
+            let track = index_arg(args, "track")?;
+            let index = index_arg(args, "index")?;
+            let target = time_from(args.get("to").context("missing to")?)?;
+            let fade = Time::from_secs_f64(
+                args.get("fade").and_then(Value::as_f64).unwrap_or(0.5),
+            )?;
+            edit(server, |p| {
+                viode_core::refit::refit(p, &dir, track, index, target, fade)?;
+                Ok(())
+            })
+        }
+        "clean_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            let strength = args.get("strength").and_then(Value::as_f64).unwrap_or(12.0);
+            if on && !(0.01..=97.0).contains(&strength) {
+                bail!("strength {strength} out of range (0.01..=97 dB)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.clean = on.then_some(strength);
+            Ok(())
+        }),
+        "duck" => {
+            let (_, dir) = require_project(server)?;
+            let track = index_arg(args, "track")?;
+            let amount = args.get("amount").and_then(Value::as_f64).unwrap_or(0.25);
+            let threshold = args.get("threshold").and_then(Value::as_f64).unwrap_or(-35.0);
+            if !(0.0..=1.0).contains(&amount) {
+                bail!("amount {amount} out of range [0, 1]");
+            }
+            edit(server, |p| {
+                let opts = viode_core::duck::DuckOptions {
+                    amount,
+                    threshold_db: threshold,
+                    ..Default::default()
+                };
+                viode_core::duck::duck(p, &dir, track, &opts)?;
+                Ok(())
+            })
+        }
+        "mark_add" => edit(server, |p| {
+            let at = time_from(args.get("at").context("missing at")?)?;
+            let text = str_arg(args, "text")?.to_string();
+            let color = args.get("color").and_then(Value::as_str).map(str::to_string);
+            p.markers.push(viode_core::Marker { at, text, color });
+            p.markers.sort_by_key(|m| m.at.0);
+            Ok(())
+        }),
+        "mark_remove" => edit(server, |p| {
+            let i = index_arg(args, "index")?;
+            if i >= p.markers.len() {
+                bail!("marker {i} out of range ({} markers)", p.markers.len());
+            }
+            p.markers.remove(i);
+            Ok(())
+        }),
         "captions" => captions_tool(server, args),
         "steady_set" => edit(server, |p| {
             let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -957,6 +1072,9 @@ fn timeline_json(project: &Project) -> Value {
         "tracks": tracks,
         "titles": project.titles.iter().enumerate().map(|(k, t)| json!({
             "index": k, "text": t.text, "at": t.at.to_string(), "dur": t.dur.to_string(),
+        })).collect::<Vec<_>>(),
+        "markers": project.markers.iter().enumerate().map(|(k, m)| json!({
+            "index": k, "text": m.text, "at": m.at.to_string(),
         })).collect::<Vec<_>>(),
         "total": project.total_duration().to_string(),
     })

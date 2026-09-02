@@ -86,9 +86,11 @@ pub struct GuiApp {
     r_output: String,
     render_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     captions_rx: Option<std::sync::mpsc::Receiver<Result<Vec<viode_core::captions::Caption>, String>>>,
+    duck_rx: Option<(usize, std::sync::mpsc::Receiver<Result<Vec<(Time, Time)>, String>>)>,
     r_reframe: bool,
     ramp_from: f64,
     ramp_to: f64,
+    refit_to: f64,
 }
 
 impl GuiApp {
@@ -153,9 +155,11 @@ impl GuiApp {
             r_output: String::new(),
             render_rx: None,
             captions_rx: None,
+            duck_rx: None,
             r_reframe: false,
             ramp_from: 1.0,
             ramp_to: 2.0,
+            refit_to: 60.0,
         };
         app.missing = viode_core::media::missing(&app.editor.project, &app.project_dir);
         app
@@ -293,6 +297,7 @@ impl GuiApp {
                 (EKey::O, Action::TrimOutToPlayhead),
                 (EKey::T, Action::AddTitle),
                 (EKey::F, Action::Freeze),
+                (EKey::M, Action::AddMarker),
                 (EKey::OpenBracket, Action::MarkIn),
                 (EKey::CloseBracket, Action::MarkOut),
                 (EKey::R, Action::RenderDialog),
@@ -338,6 +343,25 @@ impl GuiApp {
                 actions.push(Action::CommandPalette);
             }
         });
+        // Multicam: number keys take that angle over the range — the
+        // keyboard half of the angle wall.
+        let mut takes: Vec<usize> = Vec::new();
+        ctx.input(|i| {
+            for (n, key) in [
+                (1, EKey::Num1), (2, EKey::Num2), (3, EKey::Num3),
+                (4, EKey::Num4), (5, EKey::Num5), (6, EKey::Num6),
+                (7, EKey::Num7), (8, EKey::Num8), (9, EKey::Num9),
+            ] {
+                if i.key_pressed(key) {
+                    takes.push(n);
+                }
+            }
+        });
+        for n in takes {
+            if n < self.editor.project.tracks.len() {
+                self.do_take(n);
+            }
+        }
         for a in actions {
             self.perform(ctx, a);
         }
@@ -381,6 +405,13 @@ impl GuiApp {
                     self.model_changed();
                 }
             }
+            Action::AddMarker => {
+                let ph = self.state.playhead;
+                if self.editor.marker_add(ph) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
             Action::Freeze => {
                 let dir = self.project_dir.clone();
                 let ph = self.state.playhead;
@@ -389,6 +420,7 @@ impl GuiApp {
                 }
             }
             Action::Captions => self.start_captions(),
+            Action::Duck => self.start_duck(),
             Action::Undo => self.edit(|e, _| e.undo()),
             Action::Redo => self.edit(|e, _| e.redo()),
             Action::Save => self.save(),
@@ -771,6 +803,40 @@ impl GuiApp {
             );
         }
         self.draw_ruler(&painter, &map, y);
+        // Markers: diamonds on the ruler. Hover names them, click seeks,
+        // right-click removes — the mouse-complete surface for `mark`.
+        for (mi, marker) in self.editor.project.markers.clone().into_iter().enumerate() {
+            let x = map.x_of(marker.at);
+            let center = Pos2::new(x, y + RULER_H - 9.0);
+            let color = marker
+                .color
+                .as_deref()
+                .and_then(parse_hex_color)
+                .unwrap_or(self.theme.accent);
+            painter.text(
+                center,
+                Align2::CENTER_CENTER,
+                "◆",
+                FontId::proportional(10.0),
+                color,
+            );
+            let hit = Rect::from_center_size(center, egui::vec2(12.0, 12.0));
+            let resp = ui.interact(hit, ui.id().with(("marker", mi)), Sense::click());
+            if resp.clicked() {
+                let cmds = self.state.seek_to(marker.at);
+                self.apply(cmds);
+            }
+            let resp = resp.on_hover_text(format!("{} — {}", marker.at, marker.text));
+            resp.context_menu(|ui| {
+                if ui.button("Remove marker").clicked() {
+                    ui.close();
+                    if self.editor.marker_remove(mi) {
+                        self.editor.end_stage();
+                        self.model_changed();
+                    }
+                }
+            });
+        }
         y += RULER_H;
 
         // Titles lane.
@@ -1222,6 +1288,42 @@ impl GuiApp {
                     }
                 }
             });
+            let mut clean_on = clip.clean.is_some();
+            let mut clean_db = clip.clean.unwrap_or(12.0);
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut clean_on, "clean voice").changed() {
+                    changed |= self.editor.set_clean(clean_on.then_some(clean_db));
+                }
+                if clean_on {
+                    if ui
+                        .add(egui::DragValue::new(&mut clean_db).range(0.01..=97.0).prefix("nr dB "))
+                        .changed()
+                    {
+                        changed |= self.editor.set_clean(Some(clean_db));
+                    }
+                }
+            });
+            if track != 0 {
+                ui.horizontal(|ui| {
+                    ui.label("refit to");
+                    ui.add(
+                        egui::DragValue::new(&mut self.refit_to)
+                            .range(1.0..=36_000.0)
+                            .suffix(" s"),
+                    );
+                    if ui.button("apply").clicked() {
+                        let dir = self.project_dir.clone();
+                        if let (Ok(target), Ok(fade)) = (
+                            Time::from_secs_f64(self.refit_to),
+                            Time::from_secs_f64(0.5),
+                        ) {
+                            if self.editor.refit_selected(&dir, target, fade) {
+                                self.model_changed();
+                            }
+                        }
+                    }
+                });
+            }
             ui.horizontal(|ui| {
                 ui.label("ramp");
                 ui.add(egui::DragValue::new(&mut self.ramp_from).speed(0.05).range(0.05..=20.0).prefix("from "));
@@ -1464,6 +1566,24 @@ impl GuiApp {
         })
     }
 
+    /// A one-second pseudo-clip of angle `track` at the playhead, for
+    /// the wall thumbnails. Falls back to the angle's first clip.
+    fn angle_clip_at(&self, track: usize, playhead: Time) -> Option<Clip> {
+        let t = self.editor.project.tracks.get(track)?;
+        let sec = Time((playhead.0 / 1_000_000_000) * 1_000_000_000);
+        for c in &t.clips {
+            let at = c.at.unwrap_or(Time::ZERO);
+            if sec >= at && sec < at + c.len() {
+                let src_t = c.in_ + Time(((sec - at).0 as f64 * c.rate.unwrap_or(1.0)) as u64);
+                let mut thumb = c.clone();
+                thumb.in_ = src_t;
+                thumb.out = (src_t + Time(1_000_000_000)).min(c.out);
+                return Some(thumb);
+            }
+        }
+        t.clips.first().cloned()
+    }
+
     fn do_take(&mut self, track: usize) {
         let Some((s, e)) = self.take_range() else {
             self.editor.message = "mark a range ([ and ]) or park the playhead on a clip".into();
@@ -1676,18 +1796,33 @@ impl GuiApp {
                     .color(self.theme.dim)
                     .size(10.0),
             );
+            // The wall: each angle shows the frame AT THE PLAYHEAD
+            // (bucketed to the second so the artifact cache stays calm),
+            // and number keys take without touching the mouse.
+            let ph = self.state.playhead;
             for (idx, name, enabled) in angles {
-                let clip = self.editor.project.tracks[idx].clips.first().cloned();
+                let wall_clip = self.angle_clip_at(idx, ph);
                 ui.horizontal(|ui| {
-                    if let Some(clip) = &clip {
-                        if let Some(png) = self.artifact(clip, Kind::Strip, 120.0, 26.0) {
+                    ui.label(
+                        egui::RichText::new(format!("{idx}"))
+                            .monospace()
+                            .color(self.theme.accent),
+                    );
+                    if let Some(clip) = &wall_clip {
+                        if let Some(png) = self.artifact(clip, Kind::Strip, 160.0, 42.0) {
                             if let Some(tex) = self.tex_for(ui.ctx(), &png) {
-                                ui.image((tex, egui::Vec2::new(78.0, 26.0)));
+                                ui.image((tex, egui::Vec2::new(74.0, 42.0)));
                             }
                         }
                     }
                     let tag = if enabled { name.clone() } else { format!("{name} (angle)") };
-                    if ui.button(tag).on_hover_text("click = take the range from this angle").clicked() {
+                    if ui
+                        .button(tag)
+                        .on_hover_text(format!(
+                            "take this angle over the range (or press {idx})"
+                        ))
+                        .clicked()
+                    {
                         self.do_take(idx);
                     }
                 });
@@ -1982,6 +2117,7 @@ impl GuiApp {
             Action::MarkOut,
             Action::ClearMarks,
             Action::AddTitle,
+            Action::AddMarker,
             Action::Split,
             Action::Freeze,
         ] {
@@ -2053,6 +2189,83 @@ impl GuiApp {
         });
         self.captions_rx = Some(rx);
         self.editor.message = "generating captions…".into();
+    }
+
+    /// Duck the music track: the speech mask computes on a worker (the
+    /// first run decodes each dialogue source once), keys apply on
+    /// arrival. Requires exactly one candidate track, or a selection.
+    fn start_duck(&mut self) {
+        if self.duck_rx.is_some() {
+            self.editor.message = "a duck analysis is already running".into();
+            return;
+        }
+        // The selected clip's track wins; otherwise the single overlay
+        // track that carries audio.
+        let candidates: Vec<usize> = self
+            .editor
+            .project
+            .tracks
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, t)| {
+                t.kind != viode_core::TrackKind::Video && t.enabled && !t.clips.is_empty()
+            })
+            .map(|(i, _)| i)
+            .collect();
+        let track = match self.editor.selected_clip() {
+            Some((t, _)) if t != 0 => t,
+            _ if candidates.len() == 1 => candidates[0],
+            _ => {
+                self.editor.message =
+                    "select a clip on the music track first (or keep one audio overlay)".into();
+                return;
+            }
+        };
+        let project = self.editor.project.clone();
+        let dir = self.project_dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let opts = viode_core::duck::DuckOptions::default();
+            let scan = |clip: &viode_core::Clip| {
+                let abs = if clip.src.is_absolute() {
+                    clip.src.clone()
+                } else {
+                    dir.join(&clip.src)
+                };
+                viode_core::audio_scan(&dir, &abs, -30.0, 0.35, 0.1)
+                    .ok()
+                    .map(|s| s.levels)
+            };
+            let mask =
+                viode_core::duck::speech_mask(&project, scan, opts.threshold_db, opts.gap);
+            let _ = tx.send(if mask.is_empty() {
+                Err("no speech found on the main track".to_string())
+            } else {
+                Ok(mask)
+            });
+        });
+        self.duck_rx = Some((track, rx));
+        self.editor.message = "analyzing dialogue for ducking…".into();
+    }
+
+    fn poll_duck(&mut self) {
+        let Some((track, rx)) = &self.duck_rx else { return };
+        let track = *track;
+        match rx.try_recv() {
+            Ok(Ok(mask)) => {
+                self.duck_rx = None;
+                if self.editor.duck_track(track, &mask) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
+            Ok(Err(e)) => {
+                self.duck_rx = None;
+                self.editor.message = format!("duck: {e}");
+            }
+            Err(_) => {}
+        }
     }
 
     fn poll_captions(&mut self) {
@@ -2274,7 +2487,7 @@ impl GuiApp {
                 ui.monospace("shift+alt+drag    slide");
                 ui.separator();
                 ui.monospace("[ / ]      mark range in / out (esc clears)");
-                ui.monospace("           click an angle = take the marked range");
+                ui.monospace("           click an angle (or press its number) = take the range");
                 ui.monospace("r          render dialog");
                 ui.monospace("q          quit (asks when unsaved)");
             });
@@ -2403,6 +2616,7 @@ impl eframe::App for GuiApp {
         self.draw_help(ctx);
         self.draw_render_dialog(ctx);
         self.poll_captions();
+        self.poll_duck();
         self.draw_relink_dialog(ctx);
         self.draw_doctor_dialog(ctx);
         self.draw_palette(ctx);
@@ -2412,6 +2626,15 @@ impl eframe::App for GuiApp {
 
 /// Master render via GES, then the preset/codec finishing pass — one
 /// recipe shared by "render now" and the queue, mirroring the CLI.
+fn parse_hex_color(s: &str) -> Option<egui::Color32> {
+    let hex = s.strip_prefix('#')?;
+    if hex.len() != 6 {
+        return None;
+    }
+    let v = u32::from_str_radix(hex, 16).ok()?;
+    Some(egui::Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8))
+}
+
 fn run_render_job(
     project: &Project,
     dir: &std::path::Path,

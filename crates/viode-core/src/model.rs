@@ -22,6 +22,8 @@ pub struct Project {
     pub tracks: Vec<Track>,
     #[serde(default, rename = "title", skip_serializing_if = "Vec::is_empty")]
     pub titles: Vec<Title>,
+    #[serde(default, rename = "marker", skip_serializing_if = "Vec::is_empty")]
+    pub markers: Vec<Marker>,
     /// Pre-multitrack files had [[clip]] at the root; migrated into
     /// tracks[0] on load, never written back.
     #[serde(default, rename = "clip", skip_serializing)]
@@ -132,6 +134,10 @@ pub struct Clip {
     /// shake). None = no stabilization. Applied as a cached ffmpeg bake.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub steady: Option<u32>,
+    /// Voice denoise strength in dB (ffmpeg afftdn nr, ~12 = light hum
+    /// removal). None = untouched. Applied as a cached audio-only bake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clean: Option<f64>,
     /// Top-left position as fractions of the frame (0,0 = top-left).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<[f64; 2]>,
@@ -192,6 +198,7 @@ impl Clip {
             keys: Vec::new(),
             rate: None,
             steady: None,
+            clean: None,
             pos: None,
             scale: None,
             rotate: None,
@@ -229,6 +236,17 @@ impl Clip {
         let start = self.at.unwrap_or(Time::ZERO);
         (start, start + self.len())
     }
+}
+
+/// A named note on the timeline. Markers never render; they are the
+/// editor's margin notes — chapter starts, retakes, todo points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub at: Time,
+    pub text: String,
+    /// "#RRGGBB"; pickers/UIs may color-code markers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -276,6 +294,7 @@ impl Project {
             },
             tracks: vec![Track::new("main", TrackKind::Av)],
             titles: Vec::new(),
+            markers: Vec::new(),
             legacy_clips: Vec::new(),
         }
     }

@@ -193,6 +193,7 @@ and therefore aether/Omarchy — is running.
 | `d` | delete clip |
 | `<` `>` | move clip left / right in the sequence |
 | `f` | freeze the frame under the playhead (2s frame hold) |
+| `m` | drop a marker at the playhead (rename/remove via CLI) |
 | `u` `U` | undo / redo |
 | `space` | play the timeline INLINE from the playhead (instant, cuts-only) / pause |
 | `x` | stop playback |
@@ -216,6 +217,11 @@ object, the toolbar carries the handful everyone touches (split,
 delete, undo, redo, save, render), and the inspector holds every
 parametric edit. Keyboard and palette and menus all run the exact same
 actions — nothing lives in only one surface.
+
+Multicam editing lives on the angle wall: every angle shows its frame
+at the playhead, clicking one (or pressing its number key) takes it
+over the marked range or the clip under the playhead. Markers sit on
+the ruler as diamonds — click seeks, right-click removes.
 
 `viode gui` opens the current directory's project; `viode gui <path>`
 opens a project file or directory from anywhere. Started with neither —
@@ -315,6 +321,10 @@ viode ramp <i> --from 0.5 --to 2                stepped speed ramp (time remappi
 viode steady <i> [--smoothing 10] [--off]       stabilize footage (vidstab bake)
 viode captions [--srt f.srt] [--burn]           captions from local transcription
 viode render --preset shorts --reframe          Short that follows the subject (face detection)
+viode duck <track> [--amount 0.25]              duck music under dialogue (volume keyframes)
+viode clean <i> [--strength 12] [--off]         voice denoise + rumble cut (audio bake)
+viode refit <track> <i> --to 90                 retime music to a duration, seam crossfaded
+viode mark <t> [text] / marks / mark --rm <i>   named timeline markers
 viode bench <file>                              measure sw vs hw encoding on YOUR footage
 viode doctor                                    engine checkup: what works on THIS machine
 viode silences <i>                              list silent stretches
