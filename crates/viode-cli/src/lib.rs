@@ -1248,33 +1248,15 @@ fn cmd_probe(file: &Path) -> Result<()> {
 
 /// Copy a file into media/ unless it is already inside the project dir.
 fn bring_in(dir: &Path, src: &Path) -> Result<PathBuf> {
-    let canon_dir = fs::canonicalize(dir)?;
-    if let Ok(canon_src) = fs::canonicalize(src) {
-        if let Ok(rel) = canon_src.strip_prefix(&canon_dir) {
-            return Ok(rel.to_path_buf());
-        }
-        let name = canon_src.file_name().context("source has no file name")?;
-        let dest = dir.join("media").join(name);
-        if dest.exists() {
-            // Same file re-added (very normal — clips get reused): point at
-            // the existing copy. A different file under the same name is a
-            // real collision.
-            let same = fs::metadata(&canon_src).map(|m| m.len()).ok()
-                == fs::metadata(&dest).map(|m| m.len()).ok();
-            if same {
-                return Ok(PathBuf::from("media").join(name));
-            }
-            bail!(
-                "media/{} already exists with different content",
-                name.to_string_lossy()
-            );
-        }
-        fs::create_dir_all(dir.join("media"))?;
-        fs::copy(&canon_src, &dest)?;
-        println!("imported {} -> media/{}", src.display(), name.to_string_lossy());
-        return Ok(PathBuf::from("media").join(name));
+    let outside = fs::canonicalize(src)
+        .ok()
+        .and_then(|c| fs::canonicalize(dir).ok().map(|d| !c.starts_with(d)))
+        .unwrap_or(false);
+    let rel = viode_core::media::bring_in(dir, src)?;
+    if outside {
+        println!("imported {} -> {}", src.display(), rel.display());
     }
-    bail!("{} not found", src.display())
+    Ok(rel)
 }
 
 fn cmd_import(project_file: &Path, files: &[PathBuf]) -> Result<()> {

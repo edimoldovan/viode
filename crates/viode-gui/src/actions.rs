@@ -40,6 +40,13 @@ pub enum Action {
     MoveLater,
     AddTitle,
     AddMarker,
+    AddMedia,
+    AddVideoTrack,
+    AddMusicTrack,
+    AddAngle,
+    CutSilences,
+    SplitScenes,
+    BuildProxies,
     Freeze,
     Mend,
     MatchPrevious,
@@ -63,6 +70,7 @@ impl Action {
     /// Registry order is palette order for an empty query: edits first,
     /// because they are what people open the palette for.
     pub const ALL: &'static [Action] = &[
+        Action::AddMedia,
         Action::Split,
         Action::TrimInToPlayhead,
         Action::TrimOutToPlayhead,
@@ -71,6 +79,12 @@ impl Action {
         Action::MoveLater,
         Action::AddTitle,
         Action::AddMarker,
+        Action::AddAngle,
+        Action::AddVideoTrack,
+        Action::AddMusicTrack,
+        Action::CutSilences,
+        Action::SplitScenes,
+        Action::BuildProxies,
         Action::Freeze,
         Action::Mend,
         Action::MatchPrevious,
@@ -125,6 +139,13 @@ impl Action {
             Action::MarkIn => "Mark range in-point",
             Action::MarkOut => "Mark range out-point",
             Action::ClearMarks => "Clear marks / deselect",
+            Action::AddMedia => "Add footage…",
+            Action::AddVideoTrack => "Add video overlay track",
+            Action::AddMusicTrack => "Add music track",
+            Action::AddAngle => "Add camera angle (auto-sync)…",
+            Action::CutSilences => "Cut the silences",
+            Action::SplitScenes => "Split at scene changes",
+            Action::BuildProxies => "Build proxies",
             Action::Split => "Split at playhead",
             Action::TrimInToPlayhead => "Trim in-point to playhead",
             Action::TrimOutToPlayhead => "Trim out-point to playhead",
@@ -172,6 +193,13 @@ impl Action {
             Action::MarkIn => "[",
             Action::MarkOut => "]",
             Action::ClearMarks => "esc",
+            Action::AddMedia => "",
+            Action::AddVideoTrack => "",
+            Action::AddMusicTrack => "",
+            Action::AddAngle => "",
+            Action::CutSilences => "",
+            Action::SplitScenes => "",
+            Action::BuildProxies => "",
             Action::Split => "S",
             Action::TrimInToPlayhead => "I",
             Action::TrimOutToPlayhead => "O",
@@ -220,6 +248,13 @@ impl Action {
             Action::MarkIn => "range bracket take multicam",
             Action::MarkOut => "range bracket take multicam",
             Action::ClearMarks => "escape reset selection",
+            Action::AddMedia => "import clip video file media open drop",
+            Action::AddVideoTrack => "overlay broll layer pip",
+            Action::AddMusicTrack => "audio bed soundtrack layer",
+            Action::AddAngle => "multicam camera sync second",
+            Action::CutSilences => "dead air remove silence gaps",
+            Action::SplitScenes => "scene detect shots auto cut",
+            Action::BuildProxies => "performance preview fast 540p",
             Action::Split => "cut razor blade",
             Action::TrimInToPlayhead => "head start ripple",
             Action::TrimOutToPlayhead => "tail end ripple",
@@ -265,7 +300,7 @@ mod tests {
 
     #[test]
     fn edits_lead_the_registry() {
-        assert_eq!(Action::ALL[0], Action::Split);
+        assert_eq!(Action::ALL[0], Action::AddMedia);
         let pos = |a: Action| Action::ALL.iter().position(|x| *x == a).unwrap();
         assert!(pos(Action::Save) < pos(Action::PlayPause));
     }

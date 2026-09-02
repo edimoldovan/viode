@@ -6,6 +6,46 @@ use std::path::{Path, PathBuf};
 use crate::model::Project;
 
 /// Every (track, clip, src) whose source file does not exist.
+#[derive(Debug, thiserror::Error)]
+pub enum ImportError {
+    #[error("source has no file name")]
+    NoName,
+    #[error("media/{0} already exists with different content")]
+    Collision(String),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Bring a media file into the project: paths already inside the project
+/// stay referenced in place; outside files copy into media/. Re-adding
+/// the same file reuses the existing copy; a different file under the
+/// same name is a refused collision. Returns the project-relative path.
+pub fn bring_in(project_dir: &Path, src: &Path) -> Result<PathBuf, ImportError> {
+    let canon_dir = std::fs::canonicalize(project_dir)?;
+    if let Ok(canon_src) = std::fs::canonicalize(src) {
+        if let Ok(rel) = canon_src.strip_prefix(&canon_dir) {
+            return Ok(rel.to_path_buf());
+        }
+        let name = canon_src.file_name().ok_or(ImportError::NoName)?;
+        let dest = project_dir.join("media").join(name);
+        if dest.exists() {
+            let same = std::fs::metadata(&canon_src).map(|m| m.len()).ok()
+                == std::fs::metadata(&dest).map(|m| m.len()).ok();
+            if same {
+                return Ok(PathBuf::from("media").join(name));
+            }
+            return Err(ImportError::Collision(name.to_string_lossy().into_owned()));
+        }
+        std::fs::create_dir_all(dest.parent().unwrap())?;
+        std::fs::copy(&canon_src, &dest)?;
+        return Ok(PathBuf::from("media").join(name));
+    }
+    Err(ImportError::Io(std::io::Error::new(
+        std::io::ErrorKind::NotFound,
+        src.display().to_string(),
+    )))
+}
+
 pub fn missing(project: &Project, project_dir: &Path) -> Vec<(usize, usize, PathBuf)> {
     let mut out = Vec::new();
     for (ti, track) in project.tracks.iter().enumerate() {

@@ -231,6 +231,11 @@ delete, undo, redo, save, render), and the inspector holds every
 parametric edit. Keyboard and palette and menus all run the exact same
 actions — nothing lives in only one surface.
 
+Footage arrives with the mouse too: drag files onto the window, or use
+the `add` toolbar button. Tracks, angles (auto-synced by audio),
+silence cutting, scene splitting, proxies, and LUTs are all in the
+palette, the right-click menus, and the inspector.
+
 Multicam editing lives on the angle wall: every angle shows its frame
 at the playhead, clicking one (or pressing its number key) takes it
 over the marked range or the clip under the playhead. Markers sit on

@@ -93,6 +93,10 @@ pub struct GuiApp {
     render_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
     captions_rx: Option<std::sync::mpsc::Receiver<Result<Vec<viode_core::captions::Caption>, String>>>,
     duck_rx: Option<(usize, std::sync::mpsc::Receiver<Result<Vec<(Time, Time)>, String>>)>,
+    silence_rx: Option<(usize, std::sync::mpsc::Receiver<Result<Vec<(Time, Time)>, String>>)>,
+    scenes_rx: Option<(usize, std::sync::mpsc::Receiver<Result<Vec<Time>, String>>)>,
+    angle_rx: Option<std::sync::mpsc::Receiver<Result<(PathBuf, Time, f64), String>>>,
+    proxy_rx: Option<std::sync::mpsc::Receiver<Result<usize, String>>>,
     r_reframe: bool,
     ramp_from: f64,
     ramp_to: f64,
@@ -167,6 +171,10 @@ impl GuiApp {
             render_rx: None,
             captions_rx: None,
             duck_rx: None,
+            silence_rx: None,
+            scenes_rx: None,
+            angle_rx: None,
+            proxy_rx: None,
             r_reframe: false,
             ramp_from: 1.0,
             ramp_to: 2.0,
@@ -406,6 +414,36 @@ impl GuiApp {
                 self.transport(Key::ClearMarks);
                 self.editor.deselect();
             }
+            Action::AddMedia => {
+                if let Some(paths) = rfd::FileDialog::new()
+                    .add_filter(
+                        "Video/audio",
+                        &["mp4", "mov", "mkv", "webm", "avi", "mp3", "wav", "m4a", "flac", "viode"],
+                    )
+                    .pick_files()
+                {
+                    let dir = self.project_dir.clone();
+                    if self.editor.add_media(&dir, &paths) {
+                        self.model_changed();
+                    }
+                }
+            }
+            Action::AddVideoTrack => {
+                if self.editor.track_add(viode_core::TrackKind::Video) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
+            Action::AddMusicTrack => {
+                if self.editor.track_add(viode_core::TrackKind::Audio) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
+            Action::AddAngle => self.start_angle_add(),
+            Action::CutSilences => self.start_cut_silences(),
+            Action::SplitScenes => self.start_split_scenes(),
+            Action::BuildProxies => self.start_build_proxies(),
             Action::Split => self.edit(|e, ph| e.split(ph)),
             Action::TrimInToPlayhead => self.edit(|e, ph| e.trim_to_playhead(true, ph)),
             Action::TrimOutToPlayhead => self.edit(|e, ph| e.trim_to_playhead(false, ph)),
@@ -1037,6 +1075,33 @@ impl GuiApp {
         painter.rect_filled(lane, CornerRadius::ZERO, self.theme.lane);
         let track: Track = self.editor.project.tracks[track_idx].clone();
         self.track_header(&painter, panel, y, lane_h, badge, &track.name, track.enabled);
+        if track_idx != 0 {
+            let hit = Rect::from_min_size(
+                Pos2::new(panel.left(), y),
+                egui::vec2(GUTTER, lane_h),
+            );
+            let resp = ui.interact(hit, ui.id().with(("track-head", track_idx)), Sense::click());
+            let resp = resp.on_hover_text("right-click: track options");
+            resp.context_menu(|ui| {
+                let label = if track.enabled { "Disable track" } else { "Enable track" };
+                if ui.button(label).clicked() {
+                    ui.close();
+                    if self.editor.track_toggle(track_idx) {
+                        self.editor.end_stage();
+                        self.model_changed();
+                    }
+                }
+                let ctx = ui.ctx().clone();
+                if ui.button("Add video overlay track").clicked() {
+                    ui.close();
+                    self.perform(&ctx, Action::AddVideoTrack);
+                }
+                if ui.button("Add music track").clicked() {
+                    ui.close();
+                    self.perform(&ctx, Action::AddMusicTrack);
+                }
+            });
+        }
         let alpha = if track.enabled { 255 } else { 90 };
         for (index, clip) in track.clips.iter().enumerate() {
             let (start, end) = clip.span();
@@ -1331,6 +1396,31 @@ impl GuiApp {
             {
                 changed |= self.editor.set_rate(rate);
             }
+            ui.horizontal(|ui| {
+                ui.label("LUT");
+                let current = clip
+                    .lut
+                    .as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "none".into());
+                ui.label(egui::RichText::new(current).color(self.theme.dim).size(10.0));
+                if ui.button("pick…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("3D LUT", &["cube"])
+                        .pick_file()
+                    {
+                        if self.editor.set_lut(Some(path)) {
+                            self.editor.end_stage();
+                            self.model_changed();
+                        }
+                    }
+                }
+                if clip.lut.is_some() && ui.button("clear").clicked() && self.editor.set_lut(None) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            });
             let mut steady_on = clip.steady.is_some();
             let mut smoothing = clip.steady.unwrap_or(10);
             ui.horizontal(|ui| {
@@ -2261,6 +2351,7 @@ impl GuiApp {
             Action::AddMarker,
             Action::Split,
             Action::Freeze,
+            Action::AddMedia,
         ] {
             let text = if a.shortcut().is_empty() {
                 a.label().to_string()
@@ -2274,6 +2365,193 @@ impl GuiApp {
         }
         if let Some(a) = chosen {
             self.perform(&ctx, a);
+        }
+    }
+
+    fn clip_under_playhead(&self) -> Option<(usize, PathBuf)> {
+        let (i, _) = ops::source_at(&self.editor.project, self.state.playhead)?;
+        let src = self.editor.project.main().clips[i].src.clone();
+        let abs = if src.is_absolute() { src } else { self.project_dir.join(src) };
+        Some((i, abs))
+    }
+
+    /// Silence scan on a worker; the cut applies on arrival (same padding
+    /// as the CLI's cut-silences default).
+    fn start_cut_silences(&mut self) {
+        if self.silence_rx.is_some() {
+            return;
+        }
+        let Some((index, src)) = self.clip_under_playhead() else {
+            self.editor.message = "park the playhead on a clip first".into();
+            return;
+        };
+        let dir = self.project_dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = viode_core::audio_scan(&dir, &src, -35.0, 0.6, 0.5)
+                .map(|s| s.silences)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+        self.silence_rx = Some((index, rx));
+        self.editor.message = "scanning for silence…".into();
+    }
+
+    /// Scene detection on a worker; splits apply on arrival.
+    fn start_split_scenes(&mut self) {
+        if self.scenes_rx.is_some() {
+            return;
+        }
+        let Some((index, src)) = self.clip_under_playhead() else {
+            self.editor.message = "park the playhead on a clip first".into();
+            return;
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result =
+                viode_core::detect_scenes(&src, 0.4).map_err(|e| e.to_string());
+            let _ = tx.send(result);
+        });
+        self.scenes_rx = Some((index, rx));
+        self.editor.message = "detecting scene changes…".into();
+    }
+
+    /// Pick a second camera file; sync analysis runs on a worker and the
+    /// angle lands as a disabled track ready for the wall.
+    fn start_angle_add(&mut self) {
+        if self.angle_rx.is_some() {
+            return;
+        }
+        let Some(reference) = self
+            .editor
+            .project
+            .main()
+            .clips
+            .first()
+            .map(|c| self.project_dir.join(&c.src))
+        else {
+            self.editor.message = "add main footage before angles".into();
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Video", &["mp4", "mov", "mkv", "webm", "avi"])
+            .pick_file()
+        else {
+            return;
+        };
+        let dir = self.project_dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<(PathBuf, Time, f64), String> {
+                let rel = viode_core::media::bring_in(&dir, &path).map_err(|e| e.to_string())?;
+                let abs = dir.join(&rel);
+                let info =
+                    viode_core::probe::probe_cached(&dir, &abs).map_err(|e| e.to_string())?;
+                let offset = viode_core::audio_offset(&reference, &abs, 60.0)
+                    .map_err(|e| e.to_string())?;
+                Ok((rel, info.duration, offset))
+            })();
+            let _ = tx.send(result);
+        });
+        self.angle_rx = Some(rx);
+        self.editor.message = "syncing the angle by its audio…".into();
+    }
+
+    /// Proxy every source on a worker (the parallel core builder).
+    fn start_build_proxies(&mut self) {
+        if self.proxy_rx.is_some() {
+            return;
+        }
+        let mut sources: Vec<PathBuf> = Vec::new();
+        for t in &self.editor.project.tracks {
+            for c in &t.clips {
+                if !sources.contains(&c.src) {
+                    sources.push(c.src.clone());
+                }
+            }
+        }
+        if sources.is_empty() {
+            self.editor.message = "nothing to proxy yet".into();
+            return;
+        }
+        let dir = self.project_dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let results = viode_core::proxy::build_all(&dir, &sources, false, 4);
+            let ok = results.iter().filter(|(_, r)| r.is_ok()).count();
+            let _ = tx.send(if ok == 0 {
+                Err("no proxies could be built".to_string())
+            } else {
+                Ok(ok)
+            });
+        });
+        self.proxy_rx = Some(rx);
+        self.editor.message = "building proxies…".into();
+    }
+
+    fn poll_sweep_jobs(&mut self) {
+        if let Some((index, rx)) = &self.silence_rx {
+            let index = *index;
+            match rx.try_recv() {
+                Ok(Ok(ranges)) => {
+                    self.silence_rx = None;
+                    if ranges.is_empty() {
+                        self.editor.message = "no silences found".into();
+                    } else if self.editor.cut_segments(index, &ranges, Time(150_000_000)) {
+                        self.model_changed();
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.silence_rx = None;
+                    self.editor.message = format!("silence scan: {e}");
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some((index, rx)) = &self.scenes_rx {
+            let index = *index;
+            match rx.try_recv() {
+                Ok(Ok(times)) => {
+                    self.scenes_rx = None;
+                    if self.editor.split_at_sources(index, &times) {
+                        self.model_changed();
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.scenes_rx = None;
+                    self.editor.message = format!("scene detection: {e}");
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(rx) = &self.angle_rx {
+            match rx.try_recv() {
+                Ok(Ok((rel, duration, offset))) => {
+                    self.angle_rx = None;
+                    if self.editor.angle_apply(rel, duration, offset) {
+                        self.model_changed();
+                    }
+                }
+                Ok(Err(e)) => {
+                    self.angle_rx = None;
+                    self.editor.message = format!("angle sync: {e}");
+                }
+                Err(_) => {}
+            }
+        }
+        if let Some(rx) = &self.proxy_rx {
+            match rx.try_recv() {
+                Ok(Ok(n)) => {
+                    self.proxy_rx = None;
+                    self.editor.message =
+                        format!("{n} prox{} built — previews now use them", if n == 1 { "y" } else { "ies" });
+                }
+                Ok(Err(e)) => {
+                    self.proxy_rx = None;
+                    self.editor.message = format!("proxies: {e}");
+                }
+                Err(_) => {}
+            }
         }
     }
 
@@ -2431,6 +2709,7 @@ impl GuiApp {
     /// one palette or right-click away.
     fn draw_toolbar(&mut self, ui: &mut egui::Ui, panel: &Rect) {
         const ITEMS: &[(&str, Action)] = &[
+            ("add", Action::AddMedia),
             ("split", Action::Split),
             ("delete", Action::Delete),
             ("undo", Action::Undo),
@@ -2758,6 +3037,17 @@ impl eframe::App for GuiApp {
         self.draw_render_dialog(ctx);
         self.poll_captions();
         self.poll_duck();
+        self.poll_sweep_jobs();
+        // Drag a file onto the window = add footage.
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter().filter_map(|f| f.path.clone()).collect()
+        });
+        if !dropped.is_empty() {
+            let dir = self.project_dir.clone();
+            if self.editor.add_media(&dir, &dropped) {
+                self.model_changed();
+            }
+        }
         self.draw_relink_dialog(ctx);
         self.draw_doctor_dialog(ctx);
         self.draw_palette(ctx);

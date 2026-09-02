@@ -376,6 +376,20 @@ The registered command is the binary's own absolute path. User
 journey (Ed-approved): welcome card -> one click -> "restart your AI
 app and start talking."
 
+**GUI parity sweep (2026-09-02) — done.** Ed caught that `add` had no
+mouse path; the audit found six more gaps, all closed: add footage
+(file dialog, drag-and-drop onto the window, `add` toolbar button,
+ruler menu), track add video/music (palette + track-header menu),
+track enable/disable (right-click the track header), cut-silences and
+split-scenes (palette actions, analysis on workers, applied to the
+clip under the playhead), angle add with auto-sync (palette + file
+dialog + sync worker -> disabled track for the wall), proxy build
+(palette, parallel core builder on a worker), and a .cube LUT picker
+in the inspector. Media import (`bring_in`) moved to
+viode_core::media so CLI and GUI share one contract (CLI keeps its
+"imported" message). The registry test now pins AddMedia as the first
+palette entry.
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

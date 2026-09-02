@@ -452,6 +452,130 @@ impl Editor {
         true
     }
 
+    /// Add an overlay track (video = B-roll, audio = music bed).
+    pub fn track_add(&mut self, kind: viode_core::TrackKind) -> bool {
+        self.snapshot();
+        let n = self.project.tracks.len();
+        let name = match kind {
+            viode_core::TrackKind::Audio => format!("music{n}"),
+            _ => format!("overlay{n}"),
+        };
+        self.project.tracks.push(viode_core::Track::new(&name, kind));
+        self.dirty = true;
+        self.message = format!("added track {n} ({name})");
+        true
+    }
+
+    /// Enable or disable an overlay track (angles wait disabled).
+    pub fn track_toggle(&mut self, index: usize) -> bool {
+        if index == 0 || index >= self.project.tracks.len() {
+            self.message = "the main track stays on".into();
+            return false;
+        }
+        self.snapshot();
+        let t = &mut self.project.tracks[index];
+        t.enabled = !t.enabled;
+        self.dirty = true;
+        self.message = format!(
+            "track {index} ({}) {}",
+            t.name,
+            if t.enabled { "enabled" } else { "disabled" }
+        );
+        true
+    }
+
+    /// Split a main clip at SOURCE times (scene detection results).
+    pub fn split_at_sources(&mut self, index: usize, times: &[Time]) -> bool {
+        if times.is_empty() {
+            self.message = "no scene changes found".into();
+            return false;
+        }
+        self.snapshot();
+        match ops::split_at_source_times(self.project.main_mut(), index, times) {
+            Ok(n) => {
+                self.dirty = true;
+                self.message = format!("split into {n} scene(s)");
+                true
+            }
+            Err(e) => {
+                self.rollback(e);
+                false
+            }
+        }
+    }
+
+    /// Set (or clear) the selected clip's .cube LUT.
+    pub fn set_lut(&mut self, lut: Option<std::path::PathBuf>) -> bool {
+        if self.selected_clip().is_none() {
+            return false;
+        }
+        self.stage();
+        self.clip_mut().unwrap().lut = lut;
+        true
+    }
+
+    /// Land a synced angle as a new disabled track (the sync analysis
+    /// ran on a worker; this is the instant part).
+    pub fn angle_apply(&mut self, rel: std::path::PathBuf, duration: Time, offset: f64) -> bool {
+        self.snapshot();
+        let mut clip = viode_core::Clip::media(rel, Time::ZERO, duration);
+        if offset >= 0.0 {
+            clip.at = Time::from_secs_f64(offset).ok();
+        } else {
+            clip.in_ = Time::from_secs_f64(-offset).unwrap_or(Time::ZERO);
+            clip.at = Some(Time::ZERO);
+        }
+        let n = self.project.tracks.len();
+        let mut track = viode_core::Track::new(&format!("angle{n}"), viode_core::TrackKind::Av);
+        track.enabled = false;
+        track.clips.push(clip);
+        self.project.tracks.push(track);
+        self.dirty = true;
+        self.message = format!("angle{n} synced at {offset:+.3}s — number key {n} takes it");
+        true
+    }
+
+    /// Add footage to the end of the main track — the file-dialog and
+    /// drag-and-drop path. Files outside the project copy into media/.
+    pub fn add_media(&mut self, project_dir: &Path, paths: &[std::path::PathBuf]) -> bool {
+        self.snapshot();
+        let mut added = 0;
+        let mut problems: Vec<String> = Vec::new();
+        for path in paths {
+            let result = viode_core::media::bring_in(project_dir, path)
+                .map_err(|e| e.to_string())
+                .and_then(|rel| {
+                    viode_core::probe::probe_cached(project_dir, &project_dir.join(&rel))
+                        .map(|info| (rel, info.duration))
+                        .map_err(|e| e.to_string())
+                });
+            match result {
+                Ok((rel, duration)) => {
+                    let clip = viode_core::Clip::media(rel, Time::ZERO, duration);
+                    if ops::add(self.project.main_mut(), clip).is_ok() {
+                        added += 1;
+                    }
+                }
+                Err(e) => problems.push(format!(
+                    "{}: {e}",
+                    path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+                )),
+            }
+        }
+        if added == 0 {
+            self.project = self.undo.pop().unwrap();
+            self.message = problems.first().cloned().unwrap_or_else(|| "nothing added".into());
+            return false;
+        }
+        self.dirty = true;
+        self.message = if problems.is_empty() {
+            format!("added {added} clip(s)")
+        } else {
+            format!("added {added} clip(s); skipped {}", problems.join("; "))
+        };
+        true
+    }
+
     /// Morph the cut before the selected clip (or the clip under the
     /// playhead) — main track only.
     pub fn mend(&mut self, project_dir: &Path, playhead: Time) -> bool {
