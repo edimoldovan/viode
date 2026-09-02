@@ -132,7 +132,9 @@ pub fn run() -> Vec<Check> {
             probe: "ggml model",
             ok: whisper_model_present(),
             required: false,
-            fix: "download a ggml model into ~/.local/share/viode/models                   (e.g. ggml-base.en.bin from                   huggingface.co/ggerganov/whisper.cpp) or set                   VIODE_WHISPER_MODEL",
+            fix: "download a ggml model (e.g. ggml-base.en.bin from \
+                  huggingface.co/ggerganov/whisper.cpp) into \
+                  ~/.local/share/viode/models, or set VIODE_WHISPER_MODEL",
         },
     ]
 }
