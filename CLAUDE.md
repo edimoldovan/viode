@@ -254,12 +254,14 @@ Ed's call.
 
 ## Ownership and licensing (settled)
 
-Eduard Moldovan AB owns the software. The license is PolyForm Strict
-1.0.0 (LICENSE at the repo root): source is visible, but copying,
-modification, and redistribution are prohibited — personal use is the
-only granted right. Commercial licenses are sold exclusively through
-eduardmoldovan.com. There will be no hosted "Viode Cloud" services —
-Ed has ruled them out permanently. Business analysis: MONETIZATION.md.
+Eduard Moldovan AB owns the software. The repo license is PolyForm
+Free Trial 1.0.0 (LICENSE at the repo root, Ed's decision 2026-09-02):
+source is visible and anyone may evaluate it for up to 32 consecutive
+days; continued use requires a paid subscription — a low monthly price,
+sold exclusively through eduardmoldovan.com under Ed's own commercial
+agreement. There is no free personal-use tier. Redistribution stays
+prohibited. There will be no hosted "Viode Cloud" services — Ed has
+ruled them out permanently. Business analysis: MONETIZATION.md.
 Outside contributions require a signed grant to the company before
 merging.
 
