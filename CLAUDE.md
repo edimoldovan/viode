@@ -315,9 +315,13 @@ four interfaces, doctor checks in-phase per the rules:
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability
 foundation (palette, context menus, toolbar over existing verbs) ->
-creator wave -> podcast wave -> payment plumbing (checkout, key
-issuance, real license policy) -> distribution and launch. Craft and
-depth waves follow post-launch. Carve-out, confirmed by Ed: the CI
+creator wave -> podcast wave -> marketing page refresh (Ed's addition
+2026-09-02: eduardmoldovan.com/viode must always describe the current
+editor — he sends it to people; standing rule: every wave that ships
+user-facing capability updates the page in the same working session,
+in fastpost-go, which Ed commits himself) -> payment plumbing
+(checkout, key issuance, real license policy) -> distribution and
+launch. Craft and depth waves follow post-launch. Carve-out, confirmed by Ed: the CI
 half of the release spine (GitHub Actions building and testing on
 Linux and macOS) is stage 0, the immediate next work — only
 user-facing packaging waits. This supersedes the
