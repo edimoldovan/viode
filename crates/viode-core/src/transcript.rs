@@ -20,7 +20,7 @@ pub struct Segment {
 pub enum TranscribeError {
     #[error(
         "no whisper.cpp binary found (tried whisper-cli, whisper-cpp, whisper). \
-         Install whisper.cpp — on Arch: pacman -S whisper.cpp"
+         Install whisper.cpp — on Arch: pacman -S whisper-cpp"
     )]
     NoBinary,
     #[error(

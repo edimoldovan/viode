@@ -125,7 +125,7 @@ pub fn run() -> Vec<Check> {
                 || binary("whisper-cpp", "--help")
                 || binary("whisper", "--help"),
             required: false,
-            fix: "install whisper.cpp (Arch: pacman -S whisper.cpp)",
+            fix: "install whisper.cpp (Arch: pacman -S whisper-cpp)",
         },
     ]
 }
