@@ -41,21 +41,39 @@ struct Job {
 pub struct MediaCache {
     dir: PathBuf,
     ready: HashMap<u64, PathBuf>,
+    /// Ready artifacts grouped by what they depict (kind, source, range),
+    /// each with its pixel width — the stand-ins while a resize regenerates.
+    families: HashMap<u64, Vec<(u32, PathBuf)>>,
     requested: HashMap<u64, PathBuf>,
     tx: Sender<Job>,
-    rx: Receiver<(u64, PathBuf)>,
+    rx: Receiver<(u64, u64, u32, PathBuf)>,
 }
 
 fn key_of(spec: &Spec) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    family_key(spec).hash(&mut h);
+    spec.px_w.hash(&mut h);
+    spec.px_h.hash(&mut h);
+    spec.frames.hash(&mut h);
+    h.finish()
+}
+
+/// Everything about an artifact except its pixel size: two specs in one
+/// family show the same footage, so either can stand in for the other.
+fn family_key(spec: &Spec) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     spec.kind.hash(&mut h);
     spec.src.hash(&mut h);
     spec.in_s.to_bits().hash(&mut h);
     spec.out_s.to_bits().hash(&mut h);
-    spec.px_w.hash(&mut h);
-    spec.px_h.hash(&mut h);
-    spec.frames.hash(&mut h);
     h.finish()
+}
+
+/// The worker takes the most recently queued job first: a window drag
+/// queues one width per step, and the width the user settled on must not
+/// wait behind every width they passed through.
+fn next_job(queue: &mut Vec<Job>) -> Option<Job> {
+    queue.pop()
 }
 
 impl MediaCache {
@@ -63,19 +81,51 @@ impl MediaCache {
         let (tx, job_rx) = channel::<Job>();
         let (done_tx, rx) = channel();
         std::thread::spawn(move || {
-            while let Ok(job) = job_rx.recv() {
+            let mut queue: Vec<Job> = Vec::new();
+            loop {
+                if queue.is_empty() {
+                    match job_rx.recv() {
+                        Ok(job) => queue.push(job),
+                        Err(_) => return,
+                    }
+                }
+                while let Ok(job) = job_rx.try_recv() {
+                    queue.push(job);
+                }
+                let Some(job) = next_job(&mut queue) else { continue };
                 if generate(&job).is_ok() && job.dest.exists() {
-                    let _ = done_tx.send((job.key, job.dest));
+                    let family = family_key(&job.spec);
+                    let _ = done_tx.send((job.key, family, job.spec.px_w, job.dest));
                 }
             }
         });
         MediaCache {
             dir: project_dir.join("cache").join("tui"),
             ready: HashMap::new(),
+            families: HashMap::new(),
             requested: HashMap::new(),
             tx,
             rx,
         }
+    }
+
+    fn insert_ready(&mut self, key: u64, family: u64, px_w: u32, path: PathBuf) {
+        self.ready.insert(key, path.clone());
+        let members = self.families.entry(family).or_default();
+        if !members.iter().any(|(_, p)| *p == path) {
+            members.push((px_w, path));
+        }
+    }
+
+    /// A ready artifact showing the same footage as `spec` at another
+    /// pixel width — the closest width wins. Lets a lane keep its picture
+    /// (stretched) while the exact size is still being generated.
+    pub fn nearest(&self, spec: &Spec) -> Option<PathBuf> {
+        let members = self.families.get(&family_key(spec))?;
+        members
+            .iter()
+            .min_by_key(|(w, _)| w.abs_diff(spec.px_w))
+            .map(|(_, p)| p.clone())
     }
 
     pub fn dest_for(&self, spec: &Spec) -> PathBuf {
@@ -90,8 +140,8 @@ impl MediaCache {
     /// Drain finished jobs. Returns true if anything new became ready.
     pub fn pump(&mut self) -> bool {
         let mut any = false;
-        while let Ok((key, path)) = self.rx.try_recv() {
-            self.ready.insert(key, path);
+        while let Ok((key, family, px_w, path)) = self.rx.try_recv() {
+            self.insert_ready(key, family, px_w, path);
             any = true;
         }
         any
@@ -106,7 +156,7 @@ impl MediaCache {
         }
         let dest = self.dest_for(&spec);
         if dest.exists() {
-            self.ready.insert(key, dest.clone());
+            self.insert_ready(key, family_key(&spec), spec.px_w, dest.clone());
             return Some(dest);
         }
         if !self.requested.contains_key(&key) {
@@ -190,6 +240,45 @@ mod tests {
 
         // Different in/out -> different key -> not confused with the above.
         assert!(cache.get(spec(Kind::Wave, 0.5, 2.0, 480)).is_none());
+    }
+
+    #[test]
+    fn nearest_width_stands_in_while_the_exact_size_generates() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = MediaCache::new(dir.path());
+        let ready = |cache: &mut MediaCache, w: u32| {
+            let dest = cache.dest_for(&spec(Kind::Strip, 0.0, 2.0, w));
+            std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+            std::fs::write(&dest, b"png").unwrap();
+            assert_eq!(cache.get(spec(Kind::Strip, 0.0, 2.0, w)), Some(dest.clone()));
+            dest
+        };
+        let at_512 = ready(&mut cache, 512);
+        let at_1024 = ready(&mut cache, 1024);
+
+        // 640 is not ready (queued) — the closest ready width stands in.
+        assert!(cache.get(spec(Kind::Strip, 0.0, 2.0, 640)).is_none());
+        assert_eq!(cache.nearest(&spec(Kind::Strip, 0.0, 2.0, 640)), Some(at_512));
+        assert_eq!(cache.nearest(&spec(Kind::Strip, 0.0, 2.0, 900)), Some(at_1024));
+
+        // Other footage never stands in: a different range or kind is a
+        // different family.
+        assert!(cache.nearest(&spec(Kind::Strip, 0.5, 2.0, 640)).is_none());
+        assert!(cache.nearest(&spec(Kind::Wave, 0.0, 2.0, 640)).is_none());
+    }
+
+    #[test]
+    fn the_newest_request_is_generated_first() {
+        let job = |w: u32| Job {
+            key: w as u64,
+            spec: spec(Kind::Strip, 0.0, 2.0, w),
+            dest: PathBuf::from(format!("{w}.png")),
+        };
+        let mut queue = vec![job(512), job(640), job(768)];
+        assert_eq!(next_job(&mut queue).unwrap().key, 768);
+        assert_eq!(next_job(&mut queue).unwrap().key, 640);
+        assert_eq!(next_job(&mut queue).unwrap().key, 512);
+        assert!(next_job(&mut queue).is_none());
     }
 
     #[test]

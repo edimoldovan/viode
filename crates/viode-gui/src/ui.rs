@@ -565,7 +565,7 @@ impl GuiApp {
         let px_h = px_h.max(1.0) as u32;
         let frame_w = (px_h * 16) / 9;
         let frames = (px_w / frame_w.max(1)).max(1);
-        self.media.get(Spec {
+        let spec = Spec {
             kind,
             src,
             in_s: clip.in_.as_secs_f64(),
@@ -573,7 +573,11 @@ impl GuiApp {
             px_w,
             px_h,
             frames,
-        })
+        };
+        // While a resize regenerates the exact size (a 1.5-hour film takes
+        // ~20 s), keep the lane's picture: the nearest ready width is drawn
+        // stretched until the fresh one lands.
+        self.media.get(spec.clone()).or_else(|| self.media.nearest(&spec))
     }
 
     fn draw_preview(&mut self, ui: &mut egui::Ui) {

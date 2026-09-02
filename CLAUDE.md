@@ -228,9 +228,13 @@ update, not a Viode change. The GUI now renders through wgpu (Metal)
 on macOS and keeps glow on Linux — one `renderer` choice in
 viode-gui/src/lib.rs, eframe's `wgpu` feature enabled. Verified on
 Ed's Mac with this session's 1.5-hour film: picture, moving timecode,
-70 seconds of playback. Known and pre-existing: lane filmstrips are
-keyed by pixel width, so a window resize on a long film blanks the
-lanes for ~20 s while ffmpeg regenerates them.
+70 seconds of playback. Resize follow-up (same day): lane artifacts
+are keyed by pixel width, so a window drag on a long film queued one
+20-second ffmpeg strip per step and blanked the lanes for minutes.
+`MediaCache` now serves the newest request first and offers
+`nearest()`, the closest ready width of the same footage, which the
+GUI draws stretched until the exact size lands (unit-tested in
+artifacts.rs).
 
 **GES encoder default (2026-09-02).** The master render profile now
 names x264enc unless VIODE_HWACCEL opts into hardware — the encoder the
