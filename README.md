@@ -136,6 +136,9 @@ Optional: `gst-plugin-va` for hardware decode, `mpv` for TUI playback.
 Transcription also needs a ggml model: drop one (e.g. `ggml-base.en.bin`
 from huggingface.co/ggerganov/whisper.cpp) into
 `~/.local/share/viode/models`, or point `VIODE_WHISPER_MODEL` at it.
+Subject-aware reframing (`viode render --preset shorts --reframe`) needs
+the face model in the same directory — `viode doctor` prints the exact
+download command.
 
 After installing, run `viode doctor`: it checks every engine piece this
 machine has (GStreamer elements, ffmpeg, mpv, whisper.cpp) and names the
@@ -189,6 +192,7 @@ and therefore aether/Omarchy — is running.
 | `i` `o` | trim clip start / end to playhead |
 | `d` | delete clip |
 | `<` `>` | move clip left / right in the sequence |
+| `f` | freeze the frame under the playhead (2s frame hold) |
 | `u` `U` | undo / redo |
 | `space` | play the timeline INLINE from the playhead (instant, cuts-only) / pause |
 | `x` | stop playback |
@@ -306,6 +310,11 @@ viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preser
 viode play [--from T]                           LIVE composited preview, no render
 viode queue add/ls/run/clear                    render queue
 viode media ls/missing · viode relink <dir>     media management, reconnect moved files
+viode freeze <t> [--dur 2]                      frame hold: freeze the frame at t
+viode ramp <i> --from 0.5 --to 2                stepped speed ramp (time remapping)
+viode steady <i> [--smoothing 10] [--off]       stabilize footage (vidstab bake)
+viode captions [--srt f.srt] [--burn]           captions from local transcription
+viode render --preset shorts --reframe          Short that follows the subject (face detection)
 viode bench <file>                              measure sw vs hw encoding on YOUR footage
 viode doctor                                    engine checkup: what works on THIS machine
 viode silences <i>                              list silent stretches

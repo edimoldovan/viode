@@ -164,20 +164,26 @@ pub enum ExportError {
 /// Finish `master` into `output` per `preset`. Audio is always two-pass
 /// loudness-normalized; video is stream-copied when the shape is unchanged
 /// (YouTube) and re-encoded only when it must be (Shorts).
-pub fn apply_preset(master: &Path, output: &Path, preset: Preset) -> Result<(), ExportError> {
-    if let Some(dir) = output.parent() {
-        std::fs::create_dir_all(dir)?;
-    }
-    let measured = measure_loudness(master, preset.lufs())?;
-    let loudnorm = format!(
+/// Two-pass loudnorm filter string for `master` at `target_i` LUFS —
+/// shared by the presets and the reframed Shorts export.
+pub fn loudnorm_filter(master: &Path, target_i: f64) -> Result<String, ExportError> {
+    let measured = measure_loudness(master, target_i)?;
+    Ok(format!(
         "loudnorm=I={}:TP=-1.5:LRA=11:measured_I={}:measured_TP={}:measured_LRA={}:measured_thresh={}:offset={}:linear=true",
-        preset.lufs(),
+        target_i,
         measured.input_i,
         measured.input_tp,
         measured.input_lra,
         measured.input_thresh,
         measured.target_offset,
-    );
+    ))
+}
+
+pub fn apply_preset(master: &Path, output: &Path, preset: Preset) -> Result<(), ExportError> {
+    if let Some(dir) = output.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let loudnorm = loudnorm_filter(master, preset.lufs())?;
 
     let mut cmd = Command::new("ffmpeg");
     cmd.args(["-y", "-loglevel", "error", "-i"]).arg(master);

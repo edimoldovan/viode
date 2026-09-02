@@ -85,6 +85,10 @@ pub struct GuiApp {
     r_bitrate: u32,
     r_output: String,
     render_rx: Option<std::sync::mpsc::Receiver<Result<String, String>>>,
+    captions_rx: Option<std::sync::mpsc::Receiver<Result<Vec<viode_core::captions::Caption>, String>>>,
+    r_reframe: bool,
+    ramp_from: f64,
+    ramp_to: f64,
 }
 
 impl GuiApp {
@@ -148,6 +152,10 @@ impl GuiApp {
             r_bitrate: 8000,
             r_output: String::new(),
             render_rx: None,
+            captions_rx: None,
+            r_reframe: false,
+            ramp_from: 1.0,
+            ramp_to: 2.0,
         };
         app.missing = viode_core::media::missing(&app.editor.project, &app.project_dir);
         app
@@ -284,6 +292,7 @@ impl GuiApp {
                 (EKey::I, Action::TrimInToPlayhead),
                 (EKey::O, Action::TrimOutToPlayhead),
                 (EKey::T, Action::AddTitle),
+                (EKey::F, Action::Freeze),
                 (EKey::OpenBracket, Action::MarkIn),
                 (EKey::CloseBracket, Action::MarkOut),
                 (EKey::R, Action::RenderDialog),
@@ -372,6 +381,14 @@ impl GuiApp {
                     self.model_changed();
                 }
             }
+            Action::Freeze => {
+                let dir = self.project_dir.clone();
+                let ph = self.state.playhead;
+                if self.editor.freeze(&dir, ph, Time(2_000_000_000)) {
+                    self.model_changed();
+                }
+            }
+            Action::Captions => self.start_captions(),
             Action::Undo => self.edit(|e, _| e.undo()),
             Action::Redo => self.edit(|e, _| e.redo()),
             Action::Save => self.save(),
@@ -1191,6 +1208,29 @@ impl GuiApp {
             {
                 changed |= self.editor.set_rate(rate);
             }
+            let mut steady_on = clip.steady.is_some();
+            let mut smoothing = clip.steady.unwrap_or(10);
+            ui.horizontal(|ui| {
+                if ui.checkbox(&mut steady_on, "stabilize").changed() {
+                    changed |= self.editor.set_steady(steady_on.then_some(smoothing));
+                }
+                if steady_on {
+                    let mut v = smoothing as i32;
+                    if ui.add(egui::DragValue::new(&mut v).range(1..=100).prefix("smoothing ")).changed() {
+                        smoothing = v as u32;
+                        changed |= self.editor.set_steady(Some(smoothing));
+                    }
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("ramp");
+                ui.add(egui::DragValue::new(&mut self.ramp_from).speed(0.05).range(0.05..=20.0).prefix("from "));
+                ui.add(egui::DragValue::new(&mut self.ramp_to).speed(0.05).range(0.05..=20.0).prefix("to "));
+                if ui.button("apply").clicked() && self.editor.ramp(self.ramp_from, self.ramp_to, 8) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            });
 
             ui.add_space(6.0);
             ui.label("Audio");
@@ -1563,6 +1603,7 @@ impl GuiApp {
     /// Run one render job (master via GES, then preset/codec finish) —
     /// the same recipe the CLI and the queue use.
     fn start_render(&mut self, preset: Option<String>, codec: Option<String>, bitrate: Option<u32>, output: Option<PathBuf>) {
+        let reframe = self.r_reframe;
         if self.render_rx.is_some() {
             self.editor.message = "a render is already running".into();
             return;
@@ -1571,7 +1612,7 @@ impl GuiApp {
         let dir = self.project_dir.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let _ = tx.send(run_render_job(&project, &dir, preset.as_deref(), codec.as_deref(), bitrate, output));
+            let _ = tx.send(run_render_job(&project, &dir, preset.as_deref(), codec.as_deref(), bitrate, reframe, output));
         });
         self.render_rx = Some(rx);
         self.editor.message = "rendering…".into();
@@ -1739,6 +1780,9 @@ impl GuiApp {
                             ui.selectable_value(&mut self.r_preset, p.to_string(), p);
                         }
                     });
+                if self.r_preset == "shorts" {
+                    ui.checkbox(&mut self.r_reframe, "follow the subject (reframe)");
+                }
                 if self.r_preset == "custom codec" {
                     egui::ComboBox::from_label("codec")
                         .selected_text(self.r_codec.clone())
@@ -1844,6 +1888,7 @@ impl GuiApp {
                         j.preset.as_deref(),
                         j.codec.as_deref(),
                         j.bitrate,
+                        false,
                         j.output.clone(),
                     )?;
                 }
@@ -1910,6 +1955,7 @@ impl GuiApp {
         item(ui, Action::Split);
         item(ui, Action::TrimInToPlayhead);
         item(ui, Action::TrimOutToPlayhead);
+        item(ui, Action::Freeze);
         item(ui, Action::Delete);
         if track == 0 {
             ui.separator();
@@ -1937,6 +1983,7 @@ impl GuiApp {
             Action::ClearMarks,
             Action::AddTitle,
             Action::Split,
+            Action::Freeze,
         ] {
             let text = if a.shortcut().is_empty() {
                 a.label().to_string()
@@ -1950,6 +1997,78 @@ impl GuiApp {
         }
         if let Some(a) = chosen {
             self.perform(&ctx, a);
+        }
+    }
+
+    /// Generate captions on a worker (whisper can take minutes), then
+    /// burn them in as titles on arrival. Transcripts cache per source,
+    /// exactly like the CLI's `viode captions`.
+    fn start_captions(&mut self) {
+        if self.captions_rx.is_some() {
+            self.editor.message = "captions are already being generated".into();
+            return;
+        }
+        let project = self.editor.project.clone();
+        let dir = self.project_dir.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = (|| -> Result<Vec<viode_core::captions::Caption>, String> {
+                let mut sources: Vec<PathBuf> = Vec::new();
+                for clip in &project.main().clips {
+                    if !clip.src.starts_with("media/freeze") && !sources.contains(&clip.src) {
+                        sources.push(clip.src.clone());
+                    }
+                }
+                if sources.is_empty() {
+                    return Err("the timeline has no clips to caption".into());
+                }
+                let mut captions = Vec::new();
+                for src in &sources {
+                    let abs = if src.is_absolute() { src.clone() } else { dir.join(src) };
+                    let stem = src
+                        .file_stem()
+                        .map(|s| s.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    let cache = dir.join("cache").join(format!("captions-{stem}.json"));
+                    let segments: Vec<viode_core::Segment> = if cache.exists() {
+                        serde_json::from_str(
+                            &std::fs::read_to_string(&cache).map_err(|e| e.to_string())?,
+                        )
+                        .map_err(|e| e.to_string())?
+                    } else {
+                        let segs = viode_core::transcribe(&abs, &dir.join("cache"), None)
+                            .map_err(|e| e.to_string())?;
+                        let _ = std::fs::write(
+                            &cache,
+                            serde_json::to_string_pretty(&segs).unwrap_or_default(),
+                        );
+                        segs
+                    };
+                    captions.extend(viode_core::captions::map_segments(&project, src, &segments));
+                }
+                captions.sort_by_key(|c| c.start.0);
+                Ok(captions)
+            })();
+            let _ = tx.send(result);
+        });
+        self.captions_rx = Some(rx);
+        self.editor.message = "generating captions…".into();
+    }
+
+    fn poll_captions(&mut self) {
+        let Some(rx) = &self.captions_rx else { return };
+        match rx.try_recv() {
+            Ok(Ok(captions)) => {
+                self.captions_rx = None;
+                if self.editor.captions_burn(&captions) {
+                    self.model_changed();
+                }
+            }
+            Ok(Err(e)) => {
+                self.captions_rx = None;
+                self.editor.message = format!("captions: {e}");
+            }
+            Err(_) => {}
         }
     }
 
@@ -2283,6 +2402,7 @@ impl eframe::App for GuiApp {
             .show(ctx, |ui| self.draw_preview(ui));
         self.draw_help(ctx);
         self.draw_render_dialog(ctx);
+        self.poll_captions();
         self.draw_relink_dialog(ctx);
         self.draw_doctor_dialog(ctx);
         self.draw_palette(ctx);
@@ -2298,6 +2418,7 @@ fn run_render_job(
     preset: Option<&str>,
     codec: Option<&str>,
     bitrate: Option<u32>,
+    reframe: bool,
     output: Option<PathBuf>,
 ) -> Result<String, String> {
     use viode_core::RenderBackend;
@@ -2311,7 +2432,11 @@ fn run_render_job(
         let out = output.unwrap_or_else(|| {
             dir.join("renders").join(format!("{name}-{p}.{}", preset.extension()))
         });
-        viode_core::apply_preset(&master, &out, preset).map_err(|e| e.to_string())?;
+        if reframe && preset == viode_core::Preset::Shorts {
+            viode_core::reframe::shorts_reframed(&master, &out).map_err(|e| e.to_string())?;
+        } else {
+            viode_core::apply_preset(&master, &out, preset).map_err(|e| e.to_string())?;
+        }
         out
     } else if let Some(c) = codec {
         let codec = viode_core::Codec::parse(c).ok_or_else(|| format!("unknown codec {c:?}"))?;

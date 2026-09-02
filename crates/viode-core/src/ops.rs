@@ -17,6 +17,8 @@ pub enum OpError {
     BadSplit(Time, Time),
     #[error("track index {0} out of range ({1} tracks)")]
     BadTrack(usize, usize),
+    #[error("bad ramp: {0}")]
+    BadRamp(String),
 }
 
 fn check_index(track: &Track, index: usize) -> Result<(), OpError> {
@@ -95,6 +97,53 @@ pub fn split(track: &mut Track, index: usize, at: Time) -> Result<(), OpError> {
     }
     track.clips[index].out = mid;
     track.clips.insert(index + 1, right);
+    Ok(())
+}
+
+/// Speed-ramp a clip: replace it with `steps` segments of equal SOURCE
+/// length whose rates step linearly from `r_start` to `r_end`. This is
+/// the stepped form of Premiere's time remapping — every segment renders
+/// through the existing constant-rate machinery, so it works everywhere
+/// speed works. Reverse (negative rates) is not supported by the engine.
+pub fn ramp(
+    track: &mut Track,
+    index: usize,
+    r_start: f64,
+    r_end: f64,
+    steps: usize,
+) -> Result<(), OpError> {
+    check_index(track, index)?;
+    if !(2..=64).contains(&steps) {
+        return Err(OpError::BadRamp(format!("steps {steps} out of range (2..=64)")));
+    }
+    for r in [r_start, r_end] {
+        if !(0.05..=20.0).contains(&r) {
+            return Err(OpError::BadRamp(format!("rate {r} out of range [0.05, 20]")));
+        }
+    }
+    let clip = track.clips[index].clone();
+    let src_len = (clip.out - clip.in_).0;
+    if src_len < steps as u64 {
+        return Err(OpError::BadRamp("clip too short to ramp".into()));
+    }
+    let mut segments = Vec::with_capacity(steps);
+    for k in 0..steps {
+        let seg_in = clip.in_ + Time(src_len * k as u64 / steps as u64);
+        let seg_out = clip.in_ + Time(src_len * (k as u64 + 1) / steps as u64);
+        // Rate at the segment's midpoint, so the ramp is centered.
+        let t = (k as f64 + 0.5) / steps as f64;
+        let rate = r_start + (r_end - r_start) * t;
+        let mut seg = clip.clone();
+        seg.in_ = seg_in;
+        seg.out = seg_out;
+        seg.rate = (rate - 1.0).abs().gt(&1e-9).then_some(rate);
+        // Only the first segment keeps a transition with the previous clip.
+        if k > 0 {
+            seg.transition = None;
+        }
+        segments.push(seg);
+    }
+    track.clips.splice(index..=index, segments);
     Ok(())
 }
 
@@ -697,6 +746,40 @@ mod prop_tests {
                 prop_assert!(c.in_ < c.out);
             }
             prop_assert_eq!(p.main().clips[0].out, p.main().clips[1].in_);
+        }
+
+        /// Ramping a clip with ANY valid rates and step count preserves the
+        /// total SOURCE span exactly, keeps segments contiguous in source
+        /// time, and never produces an inverted clip.
+        #[test]
+        fn ramp_preserves_source_span(
+            in_ms in 0u64..5_000,
+            len_ms in 1_000u64..600_000,
+            r_start in 0.05f64..20.0,
+            r_end in 0.05f64..20.0,
+            steps in 2usize..=64,
+        ) {
+            let mut track = Track::new("main", TrackKind::Av);
+            let in_ = Time(in_ms * 1_000_000);
+            let out = Time((in_ms + len_ms) * 1_000_000);
+            track.clips.push(Clip::media("x.mp4".into(), in_, out));
+            let mut p = Project::new("prop", 30.0, [640, 360]);
+            p.tracks[0] = track;
+
+            ramp(p.main_mut(), 0, r_start, r_end, steps).unwrap();
+
+            let clips = &p.main().clips;
+            prop_assert_eq!(clips.len(), steps);
+            prop_assert_eq!(clips[0].in_, in_);
+            prop_assert_eq!(clips[steps - 1].out, out);
+            for (i, c) in clips.iter().enumerate() {
+                prop_assert!(c.in_ < c.out);
+                if i > 0 {
+                    prop_assert_eq!(c.in_, clips[i - 1].out);
+                }
+                let r = c.rate.unwrap_or(1.0);
+                prop_assert!(r >= 0.05 - 1e-9 && r <= 20.0 + 1e-9);
+            }
         }
 
         /// A take (replace_range) over ANY valid range of ANY multi-clip

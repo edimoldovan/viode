@@ -13,6 +13,7 @@ gstreamer.workspace = true
 gstreamer-editing-services.workspace = true
 gstreamer-pbutils.workspace = true
 gstreamer-controller.workspace = true
+rustface = "0.1.7"
 
 [dev-dependencies]
 proptest = "1"

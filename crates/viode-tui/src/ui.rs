@@ -382,7 +382,7 @@ fn draw_status(f: &mut Frame, app: &App, area: Rect) {
     };
     let widget = if app.message.is_empty() {
         Paragraph::new(
-            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  </> move  u undo  w save  ␣ play  v live  P composited  r render  q quit",
+            "h/l ±0.1s  H/L ±1s  j/k clips  s split  i/o trim  d del  f freeze  </> move  u undo  w save  ␣ play  v live  P composited  r render  q quit",
         )
         .style(Style::default().fg(Color::DarkGray))
     } else {
@@ -405,7 +405,7 @@ fn draw_help(f: &mut Frame) {
     let area = centered(62, 17, f.area());
     let text = "
   playhead   h/l ±0.1s   H/L ±1s   j/k clip edges
-  edit       s split   d delete   i trim start   o trim end
+  edit       s split   d delete   f freeze   i trim start   o trim end
              </> move clip   u undo   U redo
   view       space: play cuts in the pane (instant; space pause,
              x stop). v: LIVE composite in a window, no render.

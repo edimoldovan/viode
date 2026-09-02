@@ -103,6 +103,15 @@ fn add_media_clip(
     project_res: [u32; 2],
 ) -> Result<(), RenderError> {
     let path = resolve(project_dir, &clip.src);
+    // Bakes chain in a fixed order: stabilize first, then color. Each
+    // bake is a frame-identical timeline of its input, so SOURCE time is
+    // preserved through the whole chain.
+    let path = if let Some(smoothing) = clip.steady {
+        crate::steady::ensure_baked(project_dir, &path, smoothing)
+            .map_err(|e| RenderError::Gst(e.to_string()))?
+    } else {
+        path
+    };
     // A LUT'd clip plays from its ffmpeg bake (frame-identical timeline,
     // colors applied) instead of the original — see lut.rs for why.
     let path = if let Some(lut) = &clip.lut {

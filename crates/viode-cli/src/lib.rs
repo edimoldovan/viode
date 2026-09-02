@@ -136,6 +136,36 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         track: usize,
     },
+    /// Stabilize a clip's footage (vidstab bake; --off clears)
+    Steady {
+        index: usize,
+        #[arg(long, default_value_t = 10)]
+        smoothing: u32,
+        #[arg(long)]
+        off: bool,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Freeze the frame at a timeline time for a duration (frame hold)
+    Freeze {
+        /// Timeline time of the frame to hold (e.g. 1.5 or 00:01:30)
+        at: String,
+        #[arg(long, default_value = "2")]
+        dur: String,
+    },
+    /// Speed-ramp a clip: split into stepped segments from one rate to
+    /// another (Premiere's time remapping, stepped form)
+    Ramp {
+        index: usize,
+        #[arg(long)]
+        from: f64,
+        #[arg(long)]
+        to: f64,
+        #[arg(long, default_value_t = 8)]
+        steps: usize,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
     /// Roll the boundary between clip i-1 and i by ±seconds (total unchanged)
     Roll {
         index: usize,
@@ -272,6 +302,19 @@ enum Cmd {
         #[arg(long)]
         model: Option<PathBuf>,
     },
+    /// Generate captions for the whole timeline: SRT sidecar and/or
+    /// burned-in lower-third titles (uses whisper.cpp, cached per source)
+    Captions {
+        /// Write an SRT file (e.g. captions.srt)
+        #[arg(long)]
+        srt: Option<PathBuf>,
+        /// Add the captions as lower-third titles (visible in preview and render)
+        #[arg(long)]
+        burn: bool,
+        /// Path to a ggml model (or set VIODE_WHISPER_MODEL)
+        #[arg(long)]
+        model: Option<PathBuf>,
+    },
     /// Cut transcript segments [from..=to] out of a clip (see `transcribe`)
     CutText {
         index: usize,
@@ -366,6 +409,10 @@ enum Cmd {
         /// Video bitrate in kbps (default: quality-targeted CRF)
         #[arg(long)]
         bitrate: Option<u32>,
+        /// Shorts only: follow the subject instead of center-cropping
+        /// (face detection, per scene)
+        #[arg(long)]
+        reframe: bool,
         /// Optical-flow smooth slow motion to this fps (ffmpeg minterpolate)
         #[arg(long)]
         smooth: Option<u32>,
@@ -529,6 +576,46 @@ pub fn run() -> Result<()> {
             println!("clip {index} rate {rate} (timeline length {})", c.len());
             Ok(())
         }),
+        Cmd::Steady { index, smoothing, off, track } => with_project(&cli.project, |p| {
+            if !off && !viode_core::steady::vidstab_available() {
+                bail!(
+                    "stabilization needs ffmpeg built with vidstab (libvidstab); \
+                     run `viode doctor`"
+                );
+            }
+            if !(1..=100).contains(&smoothing) {
+                bail!("smoothing {smoothing} out of range (1..=100)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.steady = (!off).then_some(smoothing);
+            println!(
+                "clip {index} stabilization {}",
+                if off { "off".to_string() } else { format!("on (smoothing {smoothing})") }
+            );
+            Ok(())
+        }),
+        Cmd::Freeze { at, dur } => {
+            let project_dir = cli
+                .project
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            with_project(&cli.project, |p| {
+                let at = Time::parse(&at)?;
+                let dur = Time::parse(&dur)?;
+                let i = viode_core::freeze::freeze_at(p, &project_dir, at, dur)?;
+                println!("froze frame at {at} for {dur} (clip {i})");
+                Ok(())
+            })
+        }
+        Cmd::Ramp { index, from, to, steps, track } => with_project(&cli.project, |p| {
+            let t = ops::track_mut(p, track)?;
+            ops::ramp(t, index, from, to, steps)?;
+            println!("clip {index} ramped {from}x -> {to}x over {steps} segments");
+            Ok(())
+        }),
         Cmd::Roll { index, delta } => with_project(&cli.project, |p| {
             ops::roll(p.main_mut(), index, (delta * 1e9) as i64)?;
             println!("rolled boundary {index} by {delta}s (total {})", p.total_duration());
@@ -670,6 +757,9 @@ pub fn run() -> Result<()> {
         Cmd::Angle { file } => cmd_angle(&cli.project, &file),
         Cmd::Take { track, start, end } => cmd_take(&cli.project, track, &start, &end),
         Cmd::Transcribe { index, model } => cmd_transcribe(&cli.project, index, model.as_deref()),
+        Cmd::Captions { srt, burn, model } => {
+            cmd_captions(&cli.project, srt.as_deref(), burn, model.as_deref())
+        }
         Cmd::CutText { index, from, to, pad } => cmd_cut_text(&cli.project, index, from, to, pad),
         Cmd::Proxy { force } => cmd_proxy(&cli.project, force),
         Cmd::Waveform { index, width, height } => {
@@ -742,13 +832,14 @@ pub fn run() -> Result<()> {
             let initial = cli.project.exists().then(|| cli.project.clone());
             viode_mcp::serve(initial)
         }
-        Cmd::Render { output, smart, preset, codec, bitrate, smooth } => cmd_render(
+        Cmd::Render { output, smart, preset, codec, bitrate, reframe, smooth } => cmd_render(
             &cli.project,
             output,
             smart,
             preset.as_deref(),
             codec.as_deref(),
             bitrate,
+            reframe,
             smooth,
         ),
     }
@@ -985,6 +1076,64 @@ fn cmd_take(project_file: &Path, track_idx: usize, start: &str, end: &str) -> Re
 
 fn transcript_path(dir: &Path, index: usize) -> PathBuf {
     dir.join("cache").join(format!("transcript_{index}.json"))
+}
+
+fn cmd_captions(
+    project_file: &Path,
+    srt: Option<&Path>,
+    burn: bool,
+    model: Option<&Path>,
+) -> Result<()> {
+    let mut project = Project::load(project_file)?;
+    let dir = project_dir(project_file);
+    // Every distinct source on the main track gets one cached transcript.
+    // Freeze stills are silent by construction — skip them.
+    let mut sources: Vec<PathBuf> = Vec::new();
+    for clip in &project.main().clips {
+        if !clip.src.starts_with("media/freeze") && !sources.contains(&clip.src) {
+            sources.push(clip.src.clone());
+        }
+    }
+    if sources.is_empty() {
+        bail!("the timeline has no clips to caption");
+    }
+    let mut captions = Vec::new();
+    for src in &sources {
+        let abs = if src.is_absolute() { src.clone() } else { dir.join(src) };
+        let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let cache = dir.join("cache").join(format!("captions-{stem}.json"));
+        let segments: Vec<viode_core::Segment> = if cache.exists() {
+            serde_json::from_str(&fs::read_to_string(&cache)?)?
+        } else {
+            let segs = viode_core::transcribe(&abs, &dir.join("cache"), model)?;
+            fs::write(&cache, serde_json::to_string_pretty(&segs)?)?;
+            segs
+        };
+        captions.extend(viode_core::captions::map_segments(&project, src, &segments));
+    }
+    captions.sort_by_key(|c| c.start.0);
+    if captions.is_empty() {
+        bail!("no speech found — nothing to caption");
+    }
+    if let Some(srt_path) = srt {
+        fs::write(srt_path, viode_core::captions::to_srt(&captions))?;
+        println!("wrote {} captions to {}", captions.len(), srt_path.display());
+    }
+    if burn {
+        let n = viode_core::captions::burn(&mut project, &captions);
+        project.save(project_file)?;
+        println!("burned {n} captions in as lower-third titles");
+    }
+    if srt.is_none() && !burn {
+        for c in &captions {
+            println!("{} — {}  {}", c.start, c.end, c.text);
+        }
+        println!(
+            "{} captions (use --srt file.srt and/or --burn to deliver them)",
+            captions.len()
+        );
+    }
+    Ok(())
 }
 
 fn cmd_transcribe(project_file: &Path, index: usize, model: Option<&Path>) -> Result<()> {
@@ -1224,6 +1373,7 @@ fn cmd_queue(project_file: &Path, cmd: QueueCmd) -> Result<()> {
                     j.preset.as_deref(),
                     j.codec.as_deref(),
                     j.bitrate,
+                    false,
                     None,
                 )?;
             }
@@ -1340,6 +1490,7 @@ fn cmd_render(
     preset: Option<&str>,
     codec: Option<&str>,
     bitrate: Option<u32>,
+    reframe: bool,
     smooth: Option<u32>,
 ) -> Result<()> {
     let project = Project::load(project_file)?;
@@ -1390,12 +1541,20 @@ fn cmd_render(
     };
     backend.render(&project, &dir, &master)?;
 
+    if reframe && preset != Some(viode_core::Preset::Shorts) {
+        bail!("--reframe only applies to --preset shorts");
+    }
     let final_path = if let Some(preset) = preset {
         let out = output.unwrap_or_else(|| {
             dir.join("renders")
                 .join(format!("{name}-{}.{}", preset_name(preset), preset.extension()))
         });
-        viode_core::apply_preset(&master, &out, preset)?;
+        if reframe {
+            let spans = viode_core::reframe::shorts_reframed(&master, &out)?;
+            println!("reframed across {} scene(s)", spans.len());
+        } else {
+            viode_core::apply_preset(&master, &out, preset)?;
+        }
         out
     } else if let Some(codec) = codec {
         let out = output.unwrap_or_else(|| {

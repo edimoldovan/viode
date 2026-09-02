@@ -128,6 +128,10 @@ pub struct Clip {
     /// Playback rate: 2.0 = double speed, 0.5 = slow motion. None = 1.0.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rate: Option<f64>,
+    /// Stabilization smoothing (vidstab frames, ~10 = default camera
+    /// shake). None = no stabilization. Applied as a cached ffmpeg bake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steady: Option<u32>,
     /// Top-left position as fractions of the frame (0,0 = top-left).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<[f64; 2]>,
@@ -187,6 +191,7 @@ impl Clip {
             pan: None,
             keys: Vec::new(),
             rate: None,
+            steady: None,
             pos: None,
             scale: None,
             rotate: None,

@@ -259,6 +259,34 @@ actions.rs and they appear in every surface at once. Not included by
 scope: track on/off has no GUI verb yet (no existing capability;
 first wave that needs it adds it via the same table).
 
+**The creator wave (stage 2) — done (2026-09-02).** Five verbs, all
+four interfaces, doctor checks in-phase per the rules:
+- `freeze` — frame hold: ffmpeg materializes one source frame as a
+  real clip (media/freeze/, silent audio) inserted at the playhead;
+  core::freeze; CLI/MCP/GUI action+menus+palette/TUI `f`.
+- `ramp` — stepped time remapping: ops::ramp splits a clip into N
+  source-equal segments with linearly interpolated rates (property
+  test: source span preserved). Reverse is out (GES has no negative
+  rate). CLI/MCP/GUI inspector row.
+- `steady` — Clip.steady smoothing; core::steady bakes the whole
+  source through vidstabdetect+vidstabtransform into cache/steady
+  (mtime-keyed); backend chains steady bake -> LUT bake. Doctor
+  checks ffmpeg vidstab. CLI/MCP steady_set/GUI inspector.
+- `captions` — core::captions maps transcripts (SOURCE time, cached
+  per media file as cache/captions-<stem>.json) through trims, order,
+  and rate into timeline captions (unit-tested); delivery = SRT
+  sidecar and/or burn as lower-third Titles (existing machinery — no
+  libass). CLI/MCP/GUI palette action with worker thread. TUI: none,
+  same precedent as transcribe.
+- `reframe` — the Auto Reframe answer: scene-detect the master,
+  rustface (SeetaFace, pure Rust, portable) finds the subject per
+  scene, one ffmpeg sendcmd+crop pass makes the 1080x1920 Short;
+  faceless scenes hold the previous framing. Model auto-path
+  ~/.local/share/viode/models/seeta_fd_frontal_v1.0.bin (doctor check
+  + download command in the error). `render --preset shorts
+  --reframe` in CLI/MCP/GUI render dialog. Verified end to end on
+  this machine (real 1080x1920 output).
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

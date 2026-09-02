@@ -996,3 +996,159 @@ fn lut_bake_changes_rendered_colors() {
         "second render should not re-bake"
     );
 }
+
+#[test]
+fn freeze_inserts_a_still_and_extends_the_timeline() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP freeze test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    viode(tmp.path()).args(["new", "hold"]).assert().success();
+    let proj = tmp.path().join("hold");
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+
+    viode(&proj)
+        .args(["freeze", "1.0", "--dur", "1.5"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("froze frame"));
+
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    assert_eq!(toml.matches("[[track.clip]]").count(), 3, "split + still:\n{toml}");
+    assert!(toml.contains("media/freeze/"), "still clip missing:\n{toml}");
+    assert!(proj.join("media/freeze").exists());
+
+    // Freezing exactly on a cut inserts without splitting.
+    viode(&proj).args(["freeze", "0", "--dur", "0.5"]).assert().success();
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    assert_eq!(toml.matches("[[track.clip]]").count(), 4);
+
+    if !ges_available() {
+        eprintln!("SKIP freeze render check: GES not installed");
+        return;
+    }
+    viode(&proj).arg("render").assert().success();
+    let dur = probe_duration(&proj.join("renders/hold.mp4"));
+    assert!((dur - 4.0).abs() < 0.3, "2s + 1.5s + 0.5s holds should be ~4s, got {dur}");
+}
+
+#[test]
+fn steady_bakes_and_renders() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP steady test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("shaky.mp4"), 2.0);
+    viode(tmp.path()).args(["new", "stab"]).assert().success();
+    let proj = tmp.path().join("stab");
+    viode(&proj).args(["add", "../shaky.mp4"]).assert().success();
+
+    if !gst_element_available("x264enc") || !ges_available() {
+        eprintln!("SKIP steady render: GES not available");
+        return;
+    }
+    let has_vidstab = Proc::new("ffmpeg")
+        .args(["-hide_banner", "-filters"])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).contains(" vidstabdetect "))
+        .unwrap_or(false);
+    if !has_vidstab {
+        // The error path is part of the interface.
+        viode(&proj)
+            .args(["steady", "0"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("vidstab"));
+        eprintln!("SKIP steady bake: ffmpeg lacks vidstab");
+        return;
+    }
+    viode(&proj).args(["steady", "0"]).assert().success();
+    viode(&proj).arg("render").assert().success();
+    let bakes = std::fs::read_dir(proj.join("cache/steady"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "mkv"))
+        .count();
+    assert_eq!(bakes, 1, "expected one cached stabilization bake");
+    let dur = probe_duration(&proj.join("renders/stab.mp4"));
+    assert!((dur - 2.0).abs() < 0.3, "stabilized render keeps duration, got {dur}");
+
+    viode(&proj)
+        .args(["steady", "0", "--off"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("off"));
+}
+
+#[test]
+fn captions_error_paths_are_helpful() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP captions test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "caps"]).assert().success();
+    let proj = tmp.path().join("caps");
+
+    // An empty timeline is a clear refusal, not a crash.
+    viode(&proj)
+        .arg("captions")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no clips to caption"));
+}
+
+#[test]
+fn reframe_produces_a_vertical_short_or_names_the_missing_model() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP reframe test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+    viode(tmp.path()).args(["new", "vert", "--res", "640x360"]).assert().success();
+    let proj = tmp.path().join("vert");
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+
+    // The flag is preset-bound; using it elsewhere is a clear refusal.
+    viode(&proj)
+        .args(["render", "--reframe"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--preset shorts"));
+
+    if !ges_available() {
+        eprintln!("SKIP reframe render: GES not installed");
+        return;
+    }
+    let model = std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".local/share/viode/models/seeta_fd_frontal_v1.0.bin"))
+        .ok()
+        .filter(|p| p.exists());
+    if model.is_none() && std::env::var("VIODE_FACE_MODEL").is_err() {
+        // No model: the error must carry the exact download command.
+        viode(&proj)
+            .args(["render", "--preset", "shorts", "--reframe"])
+            .assert()
+            .failure()
+            .stderr(predicate::str::contains("curl -L -o"));
+        eprintln!("SKIP reframe full run: face model not installed");
+        return;
+    }
+    // Test pattern has no faces: the crop falls back to center, and the
+    // output must still be a real 1080x1920 Short.
+    viode(&proj)
+        .args(["render", "--preset", "shorts", "--reframe"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("reframed across"));
+    let out = Proc::new("ffprobe")
+        .args(["-v", "error", "-select_streams", "v", "-show_entries", "stream=width,height", "-of", "csv=p=0"])
+        .arg(proj.join("renders/vert-shorts.mp4"))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "1080,1920");
+}

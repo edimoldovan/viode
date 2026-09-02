@@ -104,6 +104,14 @@ pub fn run() -> Vec<Check> {
             fix: "install gst-plugins-good (the smpte plugin)",
         },
         Check {
+            feature: "Stabilization",
+            probe: "ffmpeg vidstab",
+            ok: ffmpeg_has_filter("vidstabdetect"),
+            required: false,
+            fix: "install ffmpeg built with libvidstab (Arch ffmpeg has it; \
+                  Homebrew: brew install ffmpeg)",
+        },
+        Check {
             feature: ".cube LUTs",
             probe: "ffmpeg lut3d filter",
             ok: ffmpeg_has_filter("lut3d"),
@@ -126,6 +134,15 @@ pub fn run() -> Vec<Check> {
                 || binary("whisper", "--help"),
             required: false,
             fix: "install whisper.cpp (Arch: pacman -S whisper-cpp)",
+        },
+        Check {
+            feature: "Subject reframe model",
+            probe: "seeta face model",
+            ok: crate::reframe::model_present(),
+            required: false,
+            fix: "download the face model: curl -L -o \
+                  ~/.local/share/viode/models/seeta_fd_frontal_v1.0.bin \
+                  https://github.com/atomashpolskiy/rustface/raw/master/model/seeta_fd_frontal_v1.0.bin",
         },
         Check {
             feature: "Transcription model",

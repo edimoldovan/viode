@@ -187,6 +187,58 @@ pub fn definitions() -> Vec<Value> {
             &["index"],
         ),
         tool(
+            "captions",
+            "Generate captions for the whole timeline from local \
+             transcription (cached per source file). srt writes a sidecar \
+             file; burn adds them as lower-third titles that render in \
+             preview and export. With neither, returns the caption list.",
+            json!({
+                "srt": {"type": "string"},
+                "burn": {"type": "boolean", "default": false},
+            }),
+            &[],
+        ),
+        tool(
+            "steady_set",
+            "Stabilize a clip's footage (ffmpeg vidstab, baked and cached \
+             like LUTs). smoothing ~10 = handheld shake; 0 or absent \
+             `on:false` clears.",
+            json!({
+                "index": {"type": "integer"},
+                "smoothing": {"type": "integer", "default": 10},
+                "on": {"type": "boolean", "default": true},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index"],
+        ),
+        tool(
+            "freeze",
+            "Frame hold: freeze the frame at a timeline time for a \
+             duration. The still becomes an ordinary clip inserted at the \
+             playhead (media/freeze/), so it trims and renders like any \
+             footage.",
+            json!({
+                "at": {"type": "string", "description": "timeline time, e.g. \"1.5\" or \"00:01:30\""},
+                "dur": {"type": "string", "default": "2"},
+            }),
+            &["at"],
+        ),
+        tool(
+            "ramp",
+            "Speed-ramp a clip: replace it with stepped segments whose \
+             rates run linearly from `from` to `to` (time remapping, \
+             stepped). Total SOURCE footage is preserved; timeline length \
+             rescales. Rates 0.05..20, steps 2..64.",
+            json!({
+                "index": {"type": "integer"},
+                "from": {"type": "number"},
+                "to": {"type": "number"},
+                "steps": {"type": "integer", "default": 8},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index", "from", "to"],
+        ),
+        tool(
             "speed_set",
             "Playback rate: 2 = double speed, 0.5 = slow motion, 1 clears. \
              Timeline length rescales automatically.",
@@ -500,6 +552,7 @@ pub fn definitions() -> Vec<Value> {
                 "codec": {"type": "string", "enum": ["h264", "hevc", "av1", "prores", "dnxhr"]},
                 "bitrate": {"type": "integer", "description": "kbps (with codec)"},
                 "smooth": {"type": "integer", "description": "optical-flow interpolate to this fps"},
+                "reframe": {"type": "boolean", "description": "shorts only: face-detected subject crop instead of center crop"},
             }),
             &[],
         ),
@@ -648,6 +701,38 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
                 c.lut = Some(PathBuf::from(l));
             }
             Ok(())
+        }),
+        "captions" => captions_tool(server, args),
+        "steady_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let on = args.get("on").and_then(Value::as_bool).unwrap_or(true);
+            let smoothing = args.get("smoothing").and_then(Value::as_u64).unwrap_or(10) as u32;
+            if on && !(1..=100).contains(&smoothing) {
+                bail!("smoothing {smoothing} out of range (1..=100)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.steady = on.then_some(smoothing);
+            Ok(())
+        }),
+        "freeze" => {
+            let (_, dir) = require_project(server)?;
+            let at = time_from(args.get("at").context("missing at")?)?;
+            let dur = time_from(args.get("dur").unwrap_or(&json!("2")))?;
+            edit(server, |p| {
+                viode_core::freeze::freeze_at(p, &dir, at, dur)?;
+                Ok(())
+            })
+        }
+        "ramp" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let from = args.get("from").and_then(Value::as_f64).context("missing from")?;
+            let to = args.get("to").and_then(Value::as_f64).context("missing to")?;
+            let steps = args.get("steps").and_then(Value::as_u64).unwrap_or(8) as usize;
+            let t = ops::track_mut(p, track)?;
+            Ok(ops::ramp(t, index, from, to, steps)?)
         }),
         "speed_set" => edit(server, |p| {
             let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
@@ -1359,6 +1444,64 @@ fn queue_add(server: &Server, args: &Value) -> Result<Vec<Value>> {
     Ok(text(format!("queued job {} — queue_run executes all", q.jobs.len())))
 }
 
+fn captions_tool(server: &mut Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let mut project = Project::load(&file)?;
+    let mut sources: Vec<PathBuf> = Vec::new();
+    for clip in &project.main().clips {
+        if !clip.src.starts_with("media/freeze") && !sources.contains(&clip.src) {
+            sources.push(clip.src.clone());
+        }
+    }
+    if sources.is_empty() {
+        bail!("the timeline has no clips to caption");
+    }
+    let mut captions = Vec::new();
+    for src in &sources {
+        let abs = if src.is_absolute() { src.clone() } else { dir.join(src) };
+        let stem = src
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let cache = dir.join("cache").join(format!("captions-{stem}.json"));
+        let segments: Vec<viode_core::Segment> = if cache.exists() {
+            serde_json::from_str(&std::fs::read_to_string(&cache)?)?
+        } else {
+            let segs = viode_core::transcribe(&abs, &dir.join("cache"), None)?;
+            std::fs::write(&cache, serde_json::to_string_pretty(&segs)?)?;
+            segs
+        };
+        captions.extend(viode_core::captions::map_segments(&project, src, &segments));
+    }
+    captions.sort_by_key(|c| c.start.0);
+    if captions.is_empty() {
+        bail!("no speech found — nothing to caption");
+    }
+    let mut notes = vec![format!("{} captions", captions.len())];
+    if let Some(srt) = args.get("srt").and_then(Value::as_str) {
+        let path = if Path::new(srt).is_absolute() {
+            PathBuf::from(srt)
+        } else {
+            dir.join(srt)
+        };
+        std::fs::write(&path, viode_core::captions::to_srt(&captions))?;
+        notes.push(format!("SRT written to {}", path.display()));
+    }
+    if args.get("burn").and_then(Value::as_bool).unwrap_or(false) {
+        let n = viode_core::captions::burn(&mut project, &captions);
+        project.save(&file)?;
+        notes.push(format!("{n} lower-third titles added"));
+    }
+    let list: Vec<Value> = captions
+        .iter()
+        .map(|c| json!({"start": c.start.to_string(), "end": c.end.to_string(), "text": c.text}))
+        .collect();
+    Ok(vec![json!({
+        "type": "text",
+        "text": json!({"summary": notes.join("; "), "captions": list}).to_string(),
+    })])
+}
+
 fn doctor_tool() -> Result<Vec<Value>> {
     let checks = viode_core::doctor::run();
     let report = json!({
@@ -1647,6 +1790,7 @@ fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
         bail!("timeline is empty, nothing to render");
     }
     let name = &project.project.name;
+    let reframe = args.get("reframe").and_then(Value::as_bool).unwrap_or(false);
     let preset = match args.get("preset").and_then(Value::as_str) {
         Some(p) => Some(
             viode_core::Preset::parse(p)
@@ -1685,7 +1829,11 @@ fn render(server: &Server, args: &Value) -> Result<Vec<Value>> {
             dir.join("renders")
                 .join(format!("{name}-{suffix}.{}", preset.extension()))
         });
-        viode_core::apply_preset(&master, &out, preset)?;
+        if reframe && preset == viode_core::Preset::Shorts {
+            viode_core::reframe::shorts_reframed(&master, &out)?;
+        } else {
+            viode_core::apply_preset(&master, &out, preset)?;
+        }
         out
     } else if let Some(codec) = codec {
         let out = requested_out.unwrap_or_else(|| {
