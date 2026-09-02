@@ -65,14 +65,26 @@ fn initialize(params: &Value) -> Value {
     // implement. Claiming the client's (possibly newer) version breaks
     // clients that then expect newer behavior.
     let _ = params;
-    json!({
+    let mut result = json!({
         "protocolVersion": "2025-06-18",
         "capabilities": { "tools": {} },
         "serverInfo": {
             "name": "viode",
             "version": env!("CARGO_PKG_VERSION"),
         }
-    })
+    });
+    // The engine checkup runs once at initialize so the model knows this
+    // machine's gaps BEFORE it plans an edit (the `instructions` field is
+    // shown to the client's model). A complete machine adds nothing.
+    let problems = viode_core::doctor::problems();
+    if let Some(summary) = viode_core::doctor::summary(&problems) {
+        result["instructions"] = json!(format!(
+            "{summary} The doctor tool returns the full report; features \
+             listed as missing will fail with actionable errors until \
+             their piece is installed."
+        ));
+    }
+    result
 }
 
 fn tools_call(server: &mut Server, params: &Value) -> Result<Value, (i64, String)> {

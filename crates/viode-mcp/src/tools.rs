@@ -280,6 +280,15 @@ pub fn definitions() -> Vec<Value> {
             }),
             &["path"],
         ),
+        tool(
+            "doctor",
+            "Check which engine pieces exist on this machine (GStreamer \
+             elements, ffmpeg, mpv, whisper.cpp) and which features break \
+             without them. Run this when a render fails or before relying \
+             on speed changes, LUTs, wipes, or transcription.",
+            json!({}),
+            &[],
+        ),
         tool("queue_list", "List queued render jobs.", json!({}), &[]),
         tool("queue_run", "Run every queued render job in order.", json!({}), &[]),
         tool("queue_clear", "Clear the render queue.", json!({}), &[]),
@@ -672,6 +681,7 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
         "relink" => relink_tool(server, args),
         "queue_add" => queue_add(server, args),
         "bench" => bench_tool(args),
+        "doctor" => doctor_tool(),
         "queue_list" => queue_list(server),
         "queue_run" => queue_run(server),
         "queue_clear" => queue_clear(server),
@@ -1347,6 +1357,23 @@ fn queue_add(server: &Server, args: &Value) -> Result<Vec<Value>> {
     });
     viode_core::queue::save(&dir, &q)?;
     Ok(text(format!("queued job {} — queue_run executes all", q.jobs.len())))
+}
+
+fn doctor_tool() -> Result<Vec<Value>> {
+    let checks = viode_core::doctor::run();
+    let report = json!({
+        "checks": checks.iter().map(|c| json!({
+            "feature": c.feature,
+            "probe": c.probe,
+            "ok": c.ok,
+            "required": c.required,
+            "fix": if c.ok { Value::Null } else { Value::String(c.fix.to_string()) },
+        })).collect::<Vec<_>>(),
+        "summary": viode_core::doctor::summary(
+            &checks.into_iter().filter(|c| !c.ok).collect::<Vec<_>>(),
+        ).unwrap_or_else(|| "every engine piece is present on this machine".into()),
+    });
+    Ok(vec![json!({ "type": "text", "text": report.to_string() })])
 }
 
 fn bench_tool(args: &Value) -> Result<Vec<Value>> {

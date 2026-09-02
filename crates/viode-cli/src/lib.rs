@@ -161,6 +161,9 @@ enum Cmd {
         #[arg(long, default_value_t = 30)]
         secs: u32,
     },
+    /// Check which engine pieces exist on this machine and what breaks
+    /// without them
+    Doctor,
     /// LIVE composited preview: play the timeline in a window, no render
     Play {
         #[arg(long, default_value = "0")]
@@ -542,6 +545,7 @@ pub fn run() -> Result<()> {
             Ok(())
         }),
         Cmd::Bench { file, secs } => cmd_bench(&file, secs),
+        Cmd::Doctor => cmd_doctor(),
         Cmd::Play { from } => {
             let project = Project::load(&cli.project)?;
             let dir = project_dir(&cli.project);
@@ -1467,6 +1471,32 @@ fn cmd_proxy(project_file: &Path, force: bool) -> Result<()> {
     );
     if failed > 0 {
         bail!("{failed} proxy build(s) failed");
+    }
+    Ok(())
+}
+
+fn cmd_doctor() -> Result<()> {
+    let checks = viode_core::doctor::run();
+    println!("engine checkup for this machine");
+    for c in &checks {
+        if c.ok {
+            println!("  ok    {} ({})", c.feature, c.probe);
+        } else {
+            println!("  MISS  {} ({}) — {}", c.feature, c.probe, c.fix);
+        }
+    }
+    let missing = checks.iter().filter(|c| !c.ok).count();
+    if missing == 0 {
+        println!("\nAll {} checks passed — every feature works here.", checks.len());
+    } else {
+        println!(
+            "\n{missing} of {} checks failed — the features marked MISS will \
+             error until their piece is installed.",
+            checks.len()
+        );
+    }
+    if checks.iter().any(|c| !c.ok && c.required) {
+        bail!("core dependencies are missing — Viode cannot edit on this machine yet");
     }
     Ok(())
 }

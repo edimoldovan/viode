@@ -890,3 +890,29 @@ fn render_produces_frame_accurate_output() {
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&wh.stdout).trim(), "320,180");
 }
+
+#[test]
+fn doctor_reports_the_machine_and_fails_without_core_deps() {
+    // On a working dev machine the required trio exists: doctor succeeds
+    // and lists every check by its probe name.
+    Command::cargo_bin("viode")
+        .unwrap()
+        .arg("doctor")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("engine checkup"))
+        .stdout(predicate::str::contains("ffmpeg"))
+        .stdout(predicate::str::contains("pitch"));
+
+    // With an empty PATH the sidecar binaries vanish; the missing pieces
+    // are required, so doctor must fail loudly. Helpful errors are part
+    // of the interface.
+    Command::cargo_bin("viode")
+        .unwrap()
+        .arg("doctor")
+        .env("PATH", "")
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("MISS"))
+        .stderr(predicate::str::contains("core dependencies are missing"));
+}

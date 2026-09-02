@@ -62,6 +62,9 @@ pub struct GuiApp {
     // -- the pro surface (G3) --
     /// Missing media, recomputed on load/reload/edit.
     missing: Vec<(usize, usize, PathBuf)>,
+    /// Engine gaps found once at startup (see viode_core::doctor).
+    engine_gaps: Vec<viode_core::doctor::Check>,
+    show_doctor: bool,
     show_relink: bool,
     relink_dir: String,
     scopes_on: bool,
@@ -124,6 +127,8 @@ impl GuiApp {
             key_prop: "volume".into(),
             key_value: 1.0,
             missing: Vec::new(),
+            engine_gaps: viode_core::doctor::problems(),
+            show_doctor: false,
             show_relink: false,
             relink_dir: String::new(),
             scopes_on: false,
@@ -1533,6 +1538,18 @@ impl GuiApp {
                 self.show_relink = true;
             }
         }
+        if !self.engine_gaps.is_empty() {
+            let label = format!(
+                "⚠ {} engine feature(s) unavailable — details…",
+                self.engine_gaps.len()
+            );
+            if ui
+                .button(egui::RichText::new(label).color(self.theme.title))
+                .clicked()
+            {
+                self.show_doctor = true;
+            }
+        }
         ui.horizontal(|ui| {
             if ui.button("render…").clicked() {
                 self.show_render = !self.show_render;
@@ -1789,6 +1806,40 @@ impl GuiApp {
         self.editor.message = "running queue…".into();
     }
 
+    fn draw_doctor_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_doctor {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Engine checkup")
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(
+                    "This machine's GStreamer build is missing some pieces. \
+                     Everything else works; the features below will error \
+                     until their piece is installed.",
+                );
+                ui.add_space(6.0);
+                for c in &self.engine_gaps {
+                    ui.label(
+                        egui::RichText::new(format!("✗ {} ({})", c.feature, c.probe)).strong(),
+                    );
+                    ui.label(egui::RichText::new(format!("   {}", c.fix)).size(11.0));
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new("`viode doctor` prints this report in the terminal.")
+                        .size(10.0),
+                );
+            });
+        if !open {
+            self.show_doctor = false;
+        }
+    }
+
     fn draw_relink_dialog(&mut self, ctx: &egui::Context) {
         if !self.show_relink {
             return;
@@ -1990,6 +2041,7 @@ impl eframe::App for GuiApp {
         self.draw_help(ctx);
         self.draw_render_dialog(ctx);
         self.draw_relink_dialog(ctx);
+        self.draw_doctor_dialog(ctx);
         self.draw_quit_confirm(ctx);
     }
 }

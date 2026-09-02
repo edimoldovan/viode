@@ -24,6 +24,15 @@ use graphics::Placement;
 
 pub fn run(project_file: &Path) -> Result<()> {
     let mut app = App::open(project_file)?;
+    // Engine gaps show up in the status line at launch — the same report
+    // as `viode doctor`, so nobody discovers a missing plugin mid-render.
+    let gaps = viode_core::doctor::problems();
+    if !gaps.is_empty() {
+        app.message = format!(
+            "⚠ {} engine feature(s) unavailable — run `viode doctor` (? for help)",
+            gaps.len()
+        );
+    }
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, &mut app);
     ratatui::restore();

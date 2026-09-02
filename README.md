@@ -133,6 +133,14 @@ rust  ffmpeg  gstreamer  gst-editing-services  gst-plugins-{base,good,bad,ugly} 
 
 Optional: `gst-plugin-va` for hardware decode, `mpv` for TUI playback.
 
+After installing, run `viode doctor`: it checks every engine piece this
+machine has (GStreamer elements, ffmpeg, mpv, whisper.cpp) and names the
+exact package for anything missing. GStreamer builds differ per platform
+— Homebrew's ships without soundtouch, for example — so the editor also
+tells you upfront: the GUI shows a banner, the TUI status line points at
+`viode doctor`, and the MCP server reports gaps to the AI when it
+connects, before it plans an edit around a feature that isn't there.
+
 ```bash
 git clone https://github.com/edimoldovan/viode && cd viode
 cargo install --path crates/viode-cli
@@ -285,6 +293,7 @@ viode play [--from T]                           LIVE composited preview, no rend
 viode queue add/ls/run/clear                    render queue
 viode media ls/missing · viode relink <dir>     media management, reconnect moved files
 viode bench <file>                              measure sw vs hw encoding on YOUR footage
+viode doctor                                    engine checkup: what works on THIS machine
 viode silences <i>                              list silent stretches
 viode cut-silences <i> [--pad 0.15]             cut dead air (keeps padding)
 viode scenes <i> / split-scenes <i>             scene changes / split at them

@@ -167,6 +167,15 @@ fn add_media_clip(
         )?;
     }
     if let Some(lut) = &clip.lut {
+        // No stock GStreamer build ships lut3d — say so instead of
+        // failing with a generic "bad effect" (see doctor.rs).
+        if gst::ElementFactory::find("lut3d").is_none() {
+            return Err(RenderError::Gst(
+                ".cube LUTs need a GStreamer 'lut3d' element, which this \
+                 machine's GStreamer build does not provide"
+                    .into(),
+            ));
+        }
         let lut_path = resolve(project_dir, lut);
         add_effect(&ges_clip, &format!("lut3d location={}", lut_path.display()))?;
     }

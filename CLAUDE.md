@@ -219,6 +219,20 @@ stays unset there. Ed exercised the GUI surface on the Mac and called
 it done. Phase 8 is complete on both platforms; packaging remains
 deferred by Ed's call and is the only G4 leftover.
 
+**`viode doctor` (2026-09-02) — done.** `viode_core::doctor` probes
+every engine piece (GStreamer elements per feature, ffmpeg/ffprobe,
+mpv, whisper.cpp) with a user-facing fix string per gap. Parity: CLI
+`viode doctor` (exit 1 only when a REQUIRED piece is missing), MCP
+`doctor` tool plus a gap summary in the initialize response's
+`instructions` field (the model learns this machine's limits before
+planning an edit), GUI left-panel banner with an "Engine checkup"
+dialog, TUI status line at launch. Found en route: NO stock GStreamer
+ships a `lut3d` element — the Phase 7 .cube LUT feature never rendered
+anywhere (tests only covered the TOML side). The backend now fails
+actionably (same pattern as pitch); a portable LUT implementation is
+an open decision for Ed (likeliest: bake per-clip LUTs into cached
+intermediates via ffmpeg).
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability
