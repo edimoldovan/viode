@@ -311,6 +311,34 @@ four interfaces, doctor checks in-phase per the rules:
   cache) and number keys 1-9 take that angle over the range; click
   still takes.
 
+**The craft wave (stage 4 of the countdown) — done (2026-09-02).**
+- Keyframes extended: x/y/scale (frame fractions, like `place`) bind
+  as absolute pixel control sources on the frame positioner;
+  volume/alpha keep their original binding (pinned by the fade test).
+  Movement proven on rendered pixels.
+- `matte` — Clip.matte green/blue -> the alpha element on overlay
+  clips; doctor checks it; render test proves the key-out.
+- Grade grew `gamma` (gamma element) everywhere grades live; `match`
+  (core::match_grade) closes exposure/saturation gaps between clips
+  via signalstats on mid frames — pure planner unit-tested, CLI/MCP/
+  GUI ("match previous" in clip menu + palette).
+- `bundle` — a clip whose src is another project.viode; core::bundle
+  bakes the sub-project's master into cache/bundles keyed by file
+  mtime, depth-guarded against cycles. CLI/MCP/GUI (file dialog).
+- `mend` — morph the jump cut: endpoint frames -> held 8fps runway ->
+  minterpolate -> centered trim (the runway matters: minterpolate
+  emits nothing on bare 2-frame input); bridge inserted like a freeze
+  still. CLI/MCP/GUI clip menu.
+- `mask`/`follow` — Clip.mask {region fractions, blur|pixelate,
+  follow}; whole-source bake via split/crop/effect/overlay; follow =
+  pure SAD template tracker on streamed 320x180 gray frames driving
+  crop+overlay through sendcmd (reframe's mechanism). Tracker
+  unit-tested on synthetic motion; static bake proven by luma-spread
+  drop. Pixelate downsamples with area averaging (neighbor kept the
+  original values — caught by the test).
+- TUI: craft verbs are parametric; per the transcribe precedent they
+  ship CLI/MCP/GUI. Doctor grew alpha + gblur checks (17 total).
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

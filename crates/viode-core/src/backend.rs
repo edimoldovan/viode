@@ -103,6 +103,14 @@ fn add_media_clip(
     project_res: [u32; 2],
 ) -> Result<(), RenderError> {
     let path = resolve(project_dir, &clip.src);
+    // A bundled project bakes to its master first; the result then runs
+    // the normal bake chain like any footage.
+    let path = if crate::bundle::is_bundle(&path) {
+        crate::bundle::ensure_baked(project_dir, &path)
+            .map_err(|e| RenderError::Gst(e.to_string()))?
+    } else {
+        path
+    };
     // Bakes chain in a fixed order: stabilize first, then color. Each
     // bake is a frame-identical timeline of its input, so SOURCE time is
     // preserved through the whole chain.
@@ -114,6 +122,12 @@ fn add_media_clip(
     };
     let path = if let Some(strength) = clip.clean {
         crate::clean::ensure_baked(project_dir, &path, strength)
+            .map_err(|e| RenderError::Gst(e.to_string()))?
+    } else {
+        path
+    };
+    let path = if let Some(mask) = &clip.mask {
+        crate::mask::ensure_baked(project_dir, &path, mask)
             .map_err(|e| RenderError::Gst(e.to_string()))?
     } else {
         path
@@ -150,6 +164,14 @@ fn add_media_clip(
         }
         add_effect(&ges_clip, &format!("videorate rate={r}"))?;
         add_effect(&ges_clip, &format!("pitch tempo={r}"))?;
+    }
+    if let Some(method) = &clip.matte {
+        if !["green", "blue"].contains(&method.as_str()) {
+            return Err(RenderError::Gst(format!(
+                "unknown matte {method:?} (green, blue)"
+            )));
+        }
+        add_effect(&ges_clip, &format!("alpha method={method}"))?;
     }
     // Transform: position/scale via the frame positioner, opacity via alpha.
     if clip.pos.is_some() || clip.scale.is_some() {
@@ -189,6 +211,9 @@ fn add_media_clip(
                 grade.hue.unwrap_or(0.0),
             ),
         )?;
+        if let Some(g) = grade.gamma.filter(|g| (*g - 1.0).abs() > 1e-9) {
+            add_effect(&ges_clip, &format!("gamma gamma={g}"))?;
+        }
     }
     for desc in &clip.effects {
         let effect = ges::Effect::new(desc)
@@ -213,25 +238,49 @@ fn add_media_clip(
         let mut props: Vec<&str> = clip.keys.iter().map(|k| k.prop.as_str()).collect();
         props.sort();
         props.dedup();
+        let (pw, ph) = (project_res[0] as f64, project_res[1] as f64);
         for prop in props {
-            let cs = gst_controller::InterpolationControlSource::new();
-            cs.set_mode(gst_controller::InterpolationMode::Linear);
-            for k in clip.keys.iter().filter(|k| k.prop == prop) {
-                // Keyframe timestamps are SOURCE time — the coordinates
-                // control bindings evaluate in.
-                cs.set(k.at.to_clocktime(), k.value);
-            }
-            // Bindings attach to the track elements INSIDE the clip (the
-            // audio source owns "volume", the video source owns "alpha").
-            let bound = ges_clip
-                .children(true)
-                .iter()
-                .filter_map(|c| c.downcast_ref::<ges::TrackElement>())
-                .any(|te| te.set_control_source(&cs, prop, "direct"));
-            if !bound {
-                return Err(RenderError::Gst(format!(
-                    "could not bind keyframes to {prop:?} (valid: volume, alpha)"
-                )));
+            // User-facing keyframe props map onto engine properties.
+            // x/y/scale are FRACTIONS of the frame in the model (like the
+            // static place values) and become absolute pixel bindings on
+            // the frame positioner; volume/alpha keep their original
+            // binding path, which the fade-out render test pins.
+            let targets: Vec<(&str, f64, &str)> = match prop {
+                "volume" => vec![("volume", 1.0, "direct")],
+                "alpha" => vec![("alpha", 1.0, "direct")],
+                "x" => vec![("posx", pw, "direct-absolute")],
+                "y" => vec![("posy", ph, "direct-absolute")],
+                "scale" => vec![
+                    ("width", pw, "direct-absolute"),
+                    ("height", ph, "direct-absolute"),
+                ],
+                other => {
+                    return Err(RenderError::Gst(format!(
+                        "unknown keyframe property {other:?} (valid: volume, alpha, x, y, scale)"
+                    )))
+                }
+            };
+            for (gst_prop, factor, binding) in targets {
+                let cs = gst_controller::InterpolationControlSource::new();
+                cs.set_mode(gst_controller::InterpolationMode::Linear);
+                for k in clip.keys.iter().filter(|k| k.prop == prop) {
+                    // Keyframe timestamps are SOURCE time — the
+                    // coordinates control bindings evaluate in.
+                    cs.set(k.at.to_clocktime(), k.value * factor);
+                }
+                // Bindings attach to the track elements INSIDE the clip
+                // (the audio source owns "volume", the video source owns
+                // "alpha" and the positioner properties).
+                let bound = ges_clip
+                    .children(true)
+                    .iter()
+                    .filter_map(|c| c.downcast_ref::<ges::TrackElement>())
+                    .any(|te| te.set_control_source(&cs, gst_prop, binding));
+                if !bound {
+                    return Err(RenderError::Gst(format!(
+                        "could not bind keyframes to {prop:?} (valid: volume, alpha, x, y, scale)"
+                    )));
+                }
             }
         }
     }

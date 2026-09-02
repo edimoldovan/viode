@@ -295,7 +295,7 @@ viode rm <i>                                    remove a clip
 viode fade <i> <dur>                            crossfade with previous clip (0 clears)
 viode gain <i> <vol>                            audio gain (linear, 1.0 = unity)
 viode pan <i> <p>                               stereo pan, -1..1
-viode key <i> <volume|alpha> <at> <val>         keyframe (ducking, fades, opacity)
+viode key <i> <prop> <at> <val>                 keyframe volume/alpha/x/y/scale (fades, moves)
 viode keys <i> [--rm k]                         list / remove keyframes
 viode fx <i> "<gst effect>" [--track N]         add effect, e.g. "videobalance saturation=0"
 viode track add <name> [--kind video|audio]     overlay tracks (B-roll, music)
@@ -309,7 +309,7 @@ viode take <track> <start> <end>                cut to an angle for a timeline r
 viode transcribe <i> [--model M]                whisper.cpp transcript (timed segments)
 viode cut-text <i> <from> <to>                  cut transcript segments out of the video
 viode place <i> --x --y --scale --opacity       picture-in-picture, layouts, rotation
-viode color <i> --saturation ... [--lut f.cube] color grade / LUT (baked via ffmpeg, cached)
+viode color <i> --saturation ... [--gamma 1.2] [--lut f.cube] grade / LUT (ffmpeg-baked)
 viode scope <i> [--kind waveform|vector]        colorist's instruments (PNG)
 viode speed <i> <rate>                          2 = fast, 0.5 = slow motion
 viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preserved)
@@ -321,6 +321,11 @@ viode ramp <i> --from 0.5 --to 2                stepped speed ramp (time remappi
 viode steady <i> [--smoothing 10] [--off]       stabilize footage (vidstab bake)
 viode captions [--srt f.srt] [--burn]           captions from local transcription
 viode render --preset shorts --reframe          Short that follows the subject (face detection)
+viode mend <i> [--dur 0.25]                     morph the jump cut before clip i
+viode matte <track> <i> green|blue|off          chroma key an overlay clip
+viode match <i> --to <j>                        match exposure/saturation to a reference clip
+viode mask <i> --region x,y,w,h [--follow]      blur/pixelate a region (optionally tracking it)
+viode bundle <project> [--track --at]           nest another project as one clip
 viode duck <track> [--amount 0.25]              duck music under dialogue (volume keyframes)
 viode clean <i> [--strength 12] [--off]         voice denoise + rumble cut (audio bake)
 viode refit <track> <i> --to 90                 retime music to a duration, seam crossfaded

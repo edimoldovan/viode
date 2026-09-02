@@ -117,7 +117,7 @@ pub fn definitions() -> Vec<Value> {
              This is how audio ducks and video fades in/out.",
             json!({
                 "index": {"type": "integer"},
-                "prop": {"type": "string", "enum": ["volume", "alpha"]},
+                "prop": {"type": "string", "enum": ["volume", "alpha", "x", "y", "scale"]},
                 "at": time_schema,
                 "value": {"type": "number"},
                 "track": {"type": "integer", "default": 0},
@@ -168,7 +168,7 @@ pub fn definitions() -> Vec<Value> {
             json!({
                 "index": {"type": "integer"},
                 "brightness": {"type": "number"}, "contrast": {"type": "number"},
-                "saturation": {"type": "number"}, "hue": {"type": "number"},
+                "saturation": {"type": "number"}, "hue": {"type": "number"}, "gamma": {"type": "number"},
                 "lut": {"type": "string"},
                 "track": {"type": "integer", "default": 0},
                 "clear": {"type": "boolean", "default": false},
@@ -185,6 +185,71 @@ pub fn definitions() -> Vec<Value> {
                 "kind": {"type": "string", "enum": ["waveform", "vector"], "default": "waveform"},
             }),
             &["index"],
+        ),
+        tool(
+            "mask_set",
+            "Blur or pixelate a rectangle of a clip (hide a face, a \
+             screen, a plate). region = [x,y,w,h] fractions; follow makes \
+             the mask track the region's content. Baked and cached; \
+             clear with on:false.",
+            json!({
+                "index": {"type": "integer"},
+                "region": {"type": "array", "items": {"type": "number"}},
+                "kind": {"type": "string", "enum": ["blur", "pixelate"], "default": "blur"},
+                "follow": {"type": "boolean", "default": false},
+                "on": {"type": "boolean", "default": true},
+                "track": {"type": "integer", "default": 0},
+            }),
+            &["index"],
+        ),
+        tool(
+            "mend",
+            "Smooth the jump cut before main clip `index` with a short \
+             optical-flow morph (a bridge clip is generated and inserted \
+             at the cut). Good for trimmed interviews.",
+            json!({
+                "index": {"type": "integer"},
+                "dur": {"type": "string", "default": "0.25"},
+            }),
+            &["index"],
+        ),
+        tool(
+            "bundle_add",
+            "Add another project as ONE clip (a nested sequence). The \
+             sub-project bakes to its master at render time, cached by \
+             its file mtime — edit the sub-project and the parent picks \
+             it up on the next render.",
+            json!({
+                "path": {"type": "string", "description": "sub-project directory or project.viode"},
+                "track": {"type": "integer", "default": 0},
+                "at": {"type": "string", "description": "timeline position (overlay tracks)"},
+            }),
+            &["path"],
+        ),
+        tool(
+            "match_grade",
+            "Match a clip's exposure and saturation to a reference clip \
+             (signalstats on each clip's middle frame -> brightness and \
+             saturation in the clip's color grade).",
+            json!({
+                "index": {"type": "integer"},
+                "to": {"type": "integer"},
+                "track": {"type": "integer", "default": 0},
+                "to_track": {"type": "integer"},
+            }),
+            &["index", "to"],
+        ),
+        tool(
+            "matte_set",
+            "Chroma key an overlay clip: a green or blue background \
+             becomes transparent so the tracks below show through. \
+             method \"off\" clears.",
+            json!({
+                "track": {"type": "integer"},
+                "index": {"type": "integer"},
+                "method": {"type": "string", "enum": ["green", "blue", "off"]},
+            }),
+            &["track", "index", "method"],
         ),
         tool(
             "refit",
@@ -662,8 +727,8 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
             let index = index_arg(args, "index")?;
             let prop = str_arg(args, "prop")?.to_string();
-            if prop != "volume" && prop != "alpha" {
-                bail!("unknown property {prop:?} (volume, alpha)");
+            if !["volume", "alpha", "x", "y", "scale"].contains(&prop.as_str()) {
+                bail!("unknown property {prop:?} (volume, alpha, x, y, scale)");
             }
             let value = args.get("value").and_then(Value::as_f64).context("missing value")?;
             if value < 0.0 {
@@ -739,13 +804,14 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
                 return Ok(());
             }
             let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
-                brightness: None, contrast: None, saturation: None, hue: None,
+                brightness: None, contrast: None, saturation: None, hue: None, gamma: None,
             });
             for (key, slot) in [
                 ("brightness", &mut g.brightness),
                 ("contrast", &mut g.contrast),
                 ("saturation", &mut g.saturation),
                 ("hue", &mut g.hue),
+                ("gamma", &mut g.gamma),
             ] {
                 if let Some(v) = args.get(key).and_then(Value::as_f64) {
                     *slot = Some(v);
@@ -755,6 +821,102 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
             if let Some(l) = args.get("lut").and_then(Value::as_str) {
                 c.lut = Some(PathBuf::from(l));
             }
+            Ok(())
+        }),
+        "mask_set" => edit(server, |p| {
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            if !args.get("on").and_then(Value::as_bool).unwrap_or(true) {
+                c.mask = None;
+                return Ok(());
+            }
+            let region: Vec<f64> = args
+                .get("region")
+                .and_then(Value::as_array)
+                .context("missing region [x,y,w,h]")?
+                .iter()
+                .filter_map(Value::as_f64)
+                .collect();
+            if region.len() != 4 {
+                bail!("region must be four numbers: [x, y, w, h]");
+            }
+            let mask = viode_core::Mask {
+                region: [region[0], region[1], region[2], region[3]],
+                kind: args.get("kind").and_then(Value::as_str).unwrap_or("blur").to_string(),
+                follow: args.get("follow").and_then(Value::as_bool).unwrap_or(false),
+            };
+            viode_core::mask::validate(&mask)?;
+            c.mask = Some(mask);
+            Ok(())
+        }),
+        "mend" => {
+            let (_, dir) = require_project(server)?;
+            let index = index_arg(args, "index")?;
+            let dur = time_from(args.get("dur").unwrap_or(&json!("0.25")))?;
+            edit(server, |p| {
+                viode_core::mend::mend_at(p, &dir, index, dur)?;
+                Ok(())
+            })
+        }
+        "bundle_add" => edit(server, |p| {
+            let raw = PathBuf::from(str_arg(args, "path")?);
+            let file = if raw.is_dir() { raw.join(viode_core::PROJECT_FILE) } else { raw.clone() };
+            let file = file
+                .canonicalize()
+                .with_context(|| format!("no project at {}", raw.display()))?;
+            let sub = Project::load(&file)?;
+            let dur = sub.total_duration();
+            if dur == Time::ZERO {
+                bail!("bundled project has an empty timeline");
+            }
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let mut clip = viode_core::Clip::media(file, Time::ZERO, dur);
+            if track != 0 {
+                clip.at = Some(time_from(args.get("at").context("overlay tracks need at")?)?);
+            }
+            let t = ops::track_mut(p, track)?;
+            Ok(ops::add(t, clip)?)
+        }),
+        "match_grade" => {
+            let (_, dir) = require_project(server)?;
+            let track = args.get("track").and_then(Value::as_u64).unwrap_or(0) as usize;
+            let index = index_arg(args, "index")?;
+            let to = index_arg(args, "to")?;
+            let to_track = args.get("to_track").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(track);
+            edit(server, |p| {
+                let mid = |c: &viode_core::Clip| (c.in_.0 as f64 + c.out.0 as f64) / 2.0 / 1e9;
+                let abs = |src: &Path| if src.is_absolute() { src.to_path_buf() } else { dir.join(src) };
+                let tgt = ops::track(p, track)?.clips.get(index).context("clip index out of range")?.clone();
+                let rf = ops::track(p, to_track)?.clips.get(to).context("reference index out of range")?.clone();
+                let ts = viode_core::match_grade::frame_stats(&abs(&tgt.src), mid(&tgt))?;
+                let rs = viode_core::match_grade::frame_stats(&abs(&rf.src), mid(&rf))?;
+                let (brightness, saturation) = viode_core::match_grade::plan(&ts, &rs);
+                let t = ops::track_mut(p, track)?;
+                let c = t.clips.get_mut(index).unwrap();
+                let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
+                    brightness: None, contrast: None, saturation: None, hue: None, gamma: None,
+                });
+                g.brightness = (brightness.abs() > 1e-3).then_some(brightness);
+                g.saturation = ((saturation - 1.0).abs() > 1e-3).then_some(saturation);
+                c.color = Some(g);
+                Ok(())
+            })
+        }
+        "matte_set" => edit(server, |p| {
+            let track = index_arg(args, "track")?;
+            let index = index_arg(args, "index")?;
+            let method = str_arg(args, "method")?.to_string();
+            if !["green", "blue", "off"].contains(&method.as_str()) {
+                bail!("unknown matte {method:?} (green, blue, off)");
+            }
+            if track == 0 {
+                bail!("matte applies to overlay clips");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.matte = (method != "off").then(|| method.clone());
             Ok(())
         }),
         "refit" => {

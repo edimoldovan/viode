@@ -138,6 +138,14 @@ pub struct Clip {
     /// removal). None = untouched. Applied as a cached audio-only bake.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub clean: Option<f64>,
+    /// Chroma key: "green" or "blue" backgrounds become transparent
+    /// (overlay clips — the tracks below show through).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matte: Option<String>,
+    /// Region mask: blur or pixelate a rectangle (optionally tracking
+    /// its content). Applied as a cached whole-source bake.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<Mask>,
     /// Top-left position as fractions of the frame (0,0 = top-left).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pos: Option<[f64; 2]>,
@@ -182,6 +190,8 @@ pub struct ColorGrade {
     pub saturation: Option<f64>, // 0..2, neutral 1
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hue: Option<f64>, // -1..1, neutral 0
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gamma: Option<f64>, // 0.01..10, neutral 1 (gamma element)
 }
 
 impl Clip {
@@ -199,6 +209,8 @@ impl Clip {
             rate: None,
             steady: None,
             clean: None,
+            matte: None,
+            mask: None,
             pos: None,
             scale: None,
             rotate: None,
@@ -236,6 +248,23 @@ impl Clip {
         let start = self.at.unwrap_or(Time::ZERO);
         (start, start + self.len())
     }
+}
+
+/// A region mask: hide a face, a screen, a license plate.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Mask {
+    /// [x, y, w, h] as fractions of the frame.
+    pub region: [f64; 4],
+    /// "blur" or "pixelate".
+    #[serde(default = "default_mask_kind")]
+    pub kind: String,
+    /// Track the region's content and move the mask with it.
+    #[serde(default)]
+    pub follow: bool,
+}
+
+fn default_mask_kind() -> String {
+    "blur".into()
 }
 
 /// A named note on the timeline. Markers never render; they are the

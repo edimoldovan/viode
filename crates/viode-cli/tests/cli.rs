@@ -1215,3 +1215,300 @@ fn markers_roundtrip_through_the_cli() {
         .failure()
         .stderr(predicate::str::contains("out of range"));
 }
+
+#[test]
+fn position_keyframes_move_the_picture() {
+    if !ffmpeg_available() || !ges_available() {
+        eprintln!("SKIP position keyframe test: ffmpeg/GES not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    // Solid red, so any sampled pixel is unambiguous.
+    let red = tmp.path().join("red.mp4");
+    let status = Proc::new("ffmpeg")
+        .args([
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=red:duration=2:size=320x180:rate=30",
+            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+            "-c:a", "aac", "-shortest",
+        ])
+        .arg(&red)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    viode(tmp.path()).args(["new", "mover", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("mover");
+    viode(&proj).args(["add", "../red.mp4"]).assert().success();
+    // Quarter-size clip, keyframed from the left edge to x=0.75.
+    viode(&proj).args(["place", "0", "--scale", "0.25", "--x", "0", "--y", "0"]).assert().success();
+    viode(&proj).args(["key", "0", "x", "0", "0.0"]).assert().success();
+    viode(&proj).args(["key", "0", "x", "2.0", "0.75"]).assert().success();
+    viode(&proj).arg("render").assert().success();
+
+    // Sample near the top-right: black at the start, red at the end.
+    let sample = |at: &str| -> Vec<u8> {
+        let out = Proc::new("ffmpeg")
+            .args(["-loglevel", "error", "-ss", at, "-i"])
+            .arg(proj.join("renders/mover.mp4"))
+            .args(["-frames:v", "1", "-vf", "crop=2:2:272:10,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+            .output()
+            .unwrap();
+        out.stdout[..3].to_vec()
+    };
+    let first = sample("0.05");
+    let last = sample("1.9");
+    assert!(first[0] < 60, "start: top-right should be background, got {first:?}");
+    assert!(last[0] > 180, "end: the clip should have arrived, got {last:?}");
+}
+
+#[test]
+fn matte_keys_out_the_green() {
+    if !ffmpeg_available() || !ges_available() {
+        eprintln!("SKIP matte test: ffmpeg/GES not installed");
+        return;
+    }
+    if !gst_element_available("alpha") {
+        eprintln!("SKIP matte test: GStreamer alpha element not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let solid = |name: &str, color: &str| {
+        let path = tmp.path().join(name);
+        let status = Proc::new("ffmpeg")
+            .args([
+                "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", &format!("color={color}:duration=1:size=320x180:rate=30"),
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+                "-c:a", "aac", "-shortest",
+            ])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    solid("red.mp4", "red");
+    solid("green.mp4", "green");
+
+    viode(tmp.path()).args(["new", "key", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("key");
+    viode(&proj).args(["add", "../red.mp4"]).assert().success();
+    viode(&proj).args(["track", "add", "cover", "--kind", "video"]).assert().success();
+    viode(&proj)
+        .args(["add", "../green.mp4", "--track", "1", "--at", "0"])
+        .assert()
+        .success();
+    viode(&proj).args(["matte", "1", "0", "green"]).assert().success();
+    // Main track is refused with a reason.
+    viode(&proj)
+        .args(["matte", "0", "0", "green"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("overlay"));
+
+    viode(&proj).arg("render").assert().success();
+    // The green cover is keyed out: the red below shows through.
+    let out = Proc::new("ffmpeg")
+        .args(["-loglevel", "error", "-ss", "0.5", "-i"])
+        .arg(proj.join("renders/key.mp4"))
+        .args(["-frames:v", "1", "-vf", "crop=2:2:159:89,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+        .output()
+        .unwrap();
+    let px = &out.stdout[..3];
+    assert!(px[0] > 150 && px[1] < 100, "expected red through the matte, got {px:?}");
+}
+
+#[test]
+fn match_sets_a_grade_that_closes_the_exposure_gap() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP match test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let solid = |name: &str, color: &str| {
+        let path = tmp.path().join(name);
+        let status = Proc::new("ffmpeg")
+            .args([
+                "-y", "-loglevel", "error",
+                "-f", "lavfi", "-i", &format!("color={color}:duration=1:size=320x180:rate=30"),
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "ultrafast",
+                "-c:a", "aac", "-shortest",
+            ])
+            .arg(&path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    };
+    solid("dark.mp4", "0x303030");
+    solid("bright.mp4", "0xC0C0C0");
+
+    viode(tmp.path()).args(["new", "shots"]).assert().success();
+    let proj = tmp.path().join("shots");
+    viode(&proj).args(["add", "../dark.mp4"]).assert().success();
+    viode(&proj).args(["add", "../bright.mp4"]).assert().success();
+
+    viode(&proj)
+        .args(["match", "0", "--to", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("matched clip 0"));
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    let b: f64 = toml
+        .lines()
+        .find_map(|l| l.trim().strip_prefix("brightness = "))
+        .expect("no brightness in grade")
+        .parse()
+        .unwrap();
+    assert!(b > 0.3, "dark matched to bright should raise brightness, got {b}");
+
+    viode(&proj)
+        .args(["match", "0", "--to", "9"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("reference index out of range"));
+}
+
+#[test]
+fn a_bundled_project_renders_as_one_clip() {
+    if !ffmpeg_available() || !ges_available() {
+        eprintln!("SKIP bundle test: ffmpeg/GES not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("a.mp4"), 2.0);
+
+    // The sub-project: 2s of footage.
+    viode(tmp.path()).args(["new", "intro"]).assert().success();
+    let intro = tmp.path().join("intro");
+    viode(&intro).args(["add", "../a.mp4"]).assert().success();
+
+    // The parent: 1s of its own footage plus the bundle.
+    make_clip(&tmp.path().join("b.mp4"), 1.0);
+    viode(tmp.path()).args(["new", "season"]).assert().success();
+    let season = tmp.path().join("season");
+    viode(&season).args(["add", "../b.mp4"]).assert().success();
+    viode(&season)
+        .args(["bundle", "../intro"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("bundled intro"));
+    viode(&season)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:03.000"));
+
+    viode(&season).arg("render").assert().success();
+    let dur = probe_duration(&season.join("renders/season.mp4"));
+    assert!((dur - 3.0).abs() < 0.3, "1s + 2s bundle should be ~3s, got {dur}");
+    let bakes = std::fs::read_dir(season.join("cache/bundles")).unwrap().count();
+    assert_eq!(bakes, 1, "expected one cached bundle bake");
+
+    // An empty sub-project is refused clearly.
+    viode(tmp.path()).args(["new", "empty"]).assert().success();
+    viode(&season)
+        .args(["bundle", "../empty"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("empty timeline"));
+}
+
+#[test]
+fn mend_bridges_a_jump_cut() {
+    if !ffmpeg_available() {
+        eprintln!("SKIP mend test: ffmpeg not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("a.mp4"), 3.0);
+    viode(tmp.path()).args(["new", "jump", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("jump");
+    viode(&proj).args(["add", "../a.mp4"]).assert().success();
+    // A classic jump cut: split, delete the middle.
+    viode(&proj).args(["split", "0", "1.0"]).assert().success();
+    viode(&proj).args(["split", "1", "1.0"]).assert().success();
+    viode(&proj).args(["rm", "1"]).assert().success();
+
+    viode(&proj)
+        .args(["mend", "1"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("mended the cut"));
+    let toml = std::fs::read_to_string(proj.join("project.viode")).unwrap();
+    assert!(toml.contains("media/mend/"), "bridge clip missing:\n{toml}");
+    viode(&proj)
+        .arg("ls")
+        .assert()
+        .stdout(predicate::str::contains("total 00:00:02.250"));
+
+    // Mending where there is no cut refuses.
+    viode(&proj)
+        .args(["mend", "0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("needs a cut"));
+
+    if !ges_available() {
+        eprintln!("SKIP mend render: GES not installed");
+        return;
+    }
+    viode(&proj).arg("render").assert().success();
+    let dur = probe_duration(&proj.join("renders/jump.mp4"));
+    assert!((dur - 2.25).abs() < 0.3, "2s + 0.25s bridge should be ~2.25s, got {dur}");
+}
+
+#[test]
+fn mask_flattens_the_region_it_covers() {
+    if !ffmpeg_available() || !ges_available() {
+        eprintln!("SKIP mask test: ffmpeg/GES not installed");
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    make_clip(&tmp.path().join("busy.mp4"), 2.0);
+    viode(tmp.path()).args(["new", "hide", "--res", "320x180"]).assert().success();
+    let proj = tmp.path().join("hide");
+    viode(&proj).args(["add", "../busy.mp4"]).assert().success();
+
+    // Region math is validated up front.
+    viode(&proj)
+        .args(["mask", "0", "--region", "0.9,0.9,0.5,0.5"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("inside the frame"));
+
+    viode(&proj)
+        .args(["mask", "0", "--region", "0.25,0.25,0.5,0.5", "--kind", "blur"])
+        .assert()
+        .success();
+    viode(&proj).arg("render").assert().success();
+
+    // The test pattern is busy; a pixelated region has far fewer
+    // distinct values. Compare luma spread inside the region.
+    let spread = |path: &std::path::Path| -> f64 {
+        let out = Proc::new("ffmpeg")
+            .args(["-loglevel", "info", "-ss", "1.0", "-i"])
+            .arg(path)
+            .args(["-frames:v", "1", "-vf", "crop=80:44:120:68,signalstats,metadata=print", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&out.stderr);
+        let grab = |key: &str| -> f64 {
+            log.lines()
+                .find_map(|l| l.split(key).nth(1))
+                .unwrap()
+                .trim()
+                .parse()
+                .unwrap()
+        };
+        grab("signalstats.YHIGH=") - grab("signalstats.YLOW=")
+    };
+    let masked = spread(&proj.join("renders/hide.mp4"));
+    let original = spread(&tmp.path().join("busy.mp4"));
+    assert!(
+        masked < original * 0.8,
+        "region should flatten: original spread {original}, masked {masked}"
+    );
+    let bakes = std::fs::read_dir(proj.join("cache/mask")).unwrap().count();
+    assert_eq!(bakes, 1);
+}

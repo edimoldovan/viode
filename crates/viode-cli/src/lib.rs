@@ -112,6 +112,9 @@ enum Cmd {
         saturation: Option<f64>,
         #[arg(long, allow_negative_numbers = true)]
         hue: Option<f64>,
+        /// Gamma (0.01..10, neutral 1)
+        #[arg(long)]
+        gamma: Option<f64>,
         /// 3D LUT (.cube) to apply
         #[arg(long)]
         lut: Option<PathBuf>,
@@ -135,6 +138,61 @@ enum Cmd {
         rate: f64,
         #[arg(long, default_value_t = 0)]
         track: usize,
+    },
+    /// Blur or pixelate a region of a clip (optionally tracking it)
+    Mask {
+        index: usize,
+        /// Region as x,y,w,h fractions (e.g. 0.6,0.1,0.25,0.3)
+        #[arg(long)]
+        region: Option<String>,
+        /// blur or pixelate
+        #[arg(long, default_value = "blur")]
+        kind: String,
+        /// Track the region's content and move the mask with it
+        #[arg(long)]
+        follow: bool,
+        #[arg(long)]
+        off: bool,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+    },
+    /// Smooth the jump cut before clip i with a short optical-flow morph
+    Mend {
+        /// The right-hand clip of the cut (bridges i-1 | i)
+        index: usize,
+        #[arg(long, default_value = "0.25")]
+        dur: String,
+    },
+    /// Add another project as one clip (a nested sequence)
+    Bundle {
+        /// Path to the sub-project's directory or project.viode
+        path: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+        /// Timeline position — required for overlay tracks
+        #[arg(long)]
+        at: Option<String>,
+    },
+    /// Match a clip's exposure and saturation to a reference clip
+    Match {
+        /// Clip to correct
+        index: usize,
+        /// Reference clip index
+        #[arg(long)]
+        to: usize,
+        #[arg(long, default_value_t = 0)]
+        track: usize,
+        /// Reference clip's track (defaults to the same track)
+        #[arg(long)]
+        to_track: Option<usize>,
+    },
+    /// Chroma key an overlay clip: green/blue becomes transparent
+    Matte {
+        /// Overlay track holding the keyed clip
+        track: usize,
+        index: usize,
+        /// green, blue, or off
+        method: String,
     },
     /// Retime a music overlay clip to a target duration with an
     /// invisible crossfaded seam at the quietest point
@@ -275,7 +333,8 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         track: usize,
     },
-    /// Add a keyframe: prop is volume (0..2) or alpha (0..1), at is SOURCE time
+    /// Add a keyframe: volume (0..2), alpha (0..1), or x/y/scale (frame
+    /// fractions, like `place`); at is SOURCE time
     Key {
         index: usize,
         prop: String,
@@ -579,7 +638,7 @@ pub fn run() -> Result<()> {
                 Ok(())
             })
         }
-        Cmd::Color { index, brightness, contrast, saturation, hue, lut, track, clear } => {
+        Cmd::Color { index, brightness, contrast, saturation, hue, gamma, lut, track, clear } => {
             with_project(&cli.project, |p| {
                 let t = ops::track_mut(p, track)?;
                 let c = t.clips.get_mut(index).context("clip index out of range")?;
@@ -589,14 +648,15 @@ pub fn run() -> Result<()> {
                     println!("clip {index}: neutral color");
                     return Ok(());
                 }
-                if brightness.is_some() || contrast.is_some() || saturation.is_some() || hue.is_some() {
+                if brightness.is_some() || contrast.is_some() || saturation.is_some() || hue.is_some() || gamma.is_some() {
                     let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
-                        brightness: None, contrast: None, saturation: None, hue: None,
+                        brightness: None, contrast: None, saturation: None, hue: None, gamma: None,
                     });
                     if brightness.is_some() { g.brightness = brightness; }
                     if contrast.is_some() { g.contrast = contrast; }
                     if saturation.is_some() { g.saturation = saturation; }
                     if hue.is_some() { g.hue = hue; }
+                    if gamma.is_some() { g.gamma = gamma; }
                     c.color = Some(g);
                 }
                 if lut.is_some() {
@@ -623,6 +683,115 @@ pub fn run() -> Result<()> {
             let c = t.clips.get_mut(index).context("clip index out of range")?;
             c.rate = (rate != 1.0).then_some(rate);
             println!("clip {index} rate {rate} (timeline length {})", c.len());
+            Ok(())
+        }),
+        Cmd::Mask { index, region, kind, follow, off, track } => with_project(&cli.project, |p| {
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            if off {
+                c.mask = None;
+                println!("clip {index} mask off");
+                return Ok(());
+            }
+            let region_str = region.context("give --region x,y,w,h (fractions)")?;
+            let parts: Vec<f64> = region_str
+                .split(',')
+                .map(|v| v.trim().parse::<f64>())
+                .collect::<Result<_, _>>()
+                .context("region must be four numbers: x,y,w,h")?;
+            if parts.len() != 4 {
+                bail!("region must be four numbers: x,y,w,h");
+            }
+            let mask = viode_core::Mask {
+                region: [parts[0], parts[1], parts[2], parts[3]],
+                kind: kind.clone(),
+                follow,
+            };
+            viode_core::mask::validate(&mask)?;
+            c.mask = Some(mask);
+            println!(
+                "clip {index} mask {kind} at {region_str}{}",
+                if follow { " (following)" } else { "" }
+            );
+            Ok(())
+        }),
+        Cmd::Mend { index, dur } => {
+            let project_dir = cli
+                .project
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            with_project(&cli.project, |p| {
+                let dur = Time::parse(&dur)?;
+                let i = viode_core::mend::mend_at(p, &project_dir, index, dur)?;
+                println!("mended the cut with a {dur} morph (clip {i})");
+                Ok(())
+            })
+        }
+        Cmd::Bundle { path, track, at } => with_project(&cli.project, |p| {
+            let file = if path.is_dir() { path.join(PROJECT_FILE) } else { path.clone() };
+            let file = file.canonicalize().with_context(|| format!("no project at {}", path.display()))?;
+            let sub = Project::load(&file)?;
+            let dur = sub.total_duration();
+            if dur == Time::ZERO {
+                bail!("bundled project {} has an empty timeline", file.display());
+            }
+            let mut clip = Clip::media(file.clone(), Time::ZERO, dur);
+            if track != 0 {
+                clip.at = Some(Time::parse(
+                    at.as_deref().context("overlay tracks need --at")?,
+                )?);
+            }
+            let t = ops::track_mut(p, track)?;
+            ops::add(t, clip)?;
+            println!(
+                "bundled {} ({dur}) as a clip on track {track}",
+                sub.project.name
+            );
+            Ok(())
+        }),
+        Cmd::Match { index, to, track, to_track } => {
+            let project_dir = cli
+                .project
+                .parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+            with_project(&cli.project, |p| {
+                let mid = |c: &Clip| (c.in_.0 as f64 + c.out.0 as f64) / 2.0 / 1e9;
+                let abs = |src: &Path| if src.is_absolute() { src.to_path_buf() } else { project_dir.join(src) };
+                let tgt = ops::track(p, track)?.clips.get(index).context("clip index out of range")?.clone();
+                let rt = to_track.unwrap_or(track);
+                let rf = ops::track(p, rt)?.clips.get(to).context("reference index out of range")?.clone();
+                let tgt_stats = viode_core::match_grade::frame_stats(&abs(&tgt.src), mid(&tgt))?;
+                let ref_stats = viode_core::match_grade::frame_stats(&abs(&rf.src), mid(&rf))?;
+                let (brightness, saturation) = viode_core::match_grade::plan(&tgt_stats, &ref_stats);
+                let t = ops::track_mut(p, track)?;
+                let c = t.clips.get_mut(index).unwrap();
+                let mut g = c.color.clone().unwrap_or(viode_core::ColorGrade {
+                    brightness: None, contrast: None, saturation: None, hue: None, gamma: None,
+                });
+                g.brightness = (brightness.abs() > 1e-3).then_some(brightness);
+                g.saturation = ((saturation - 1.0).abs() > 1e-3).then_some(saturation);
+                c.color = Some(g);
+                println!(
+                    "matched clip {index} to clip {to}: brightness {brightness:+.3}, saturation x{saturation:.3}"
+                );
+                Ok(())
+            })
+        }
+        Cmd::Matte { track, index, method } => with_project(&cli.project, |p| {
+            if !["green", "blue", "off"].contains(&method.as_str()) {
+                bail!("unknown matte {method:?} (green, blue, off)");
+            }
+            if track == 0 {
+                bail!("matte applies to overlay clips (the tracks below show through)");
+            }
+            let t = ops::track_mut(p, track)?;
+            let c = t.clips.get_mut(index).context("clip index out of range")?;
+            c.matte = (method != "off").then(|| method.clone());
+            println!("track {track} clip {index} matte {method}");
             Ok(())
         }),
         Cmd::Refit { track, index, to, fade } => {
@@ -810,8 +979,8 @@ pub fn run() -> Result<()> {
             Ok(())
         }),
         Cmd::Key { index, prop, at, value, track } => with_project(&cli.project, |p| {
-            if prop != "volume" && prop != "alpha" {
-                bail!("unknown property {prop:?} (volume, alpha)");
+            if !["volume", "alpha", "x", "y", "scale"].contains(&prop.as_str()) {
+                bail!("unknown property {prop:?} (volume, alpha, x, y, scale)");
             }
             if value < 0.0 {
                 bail!("keyframe values must be >= 0");

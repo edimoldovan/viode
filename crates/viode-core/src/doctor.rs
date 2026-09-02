@@ -97,11 +97,25 @@ pub fn run() -> Vec<Check> {
             fix: "install gst-plugins-good (the audiofx plugin)",
         },
         Check {
+            feature: "Chroma key (matte)",
+            probe: "alpha",
+            ok: el("alpha"),
+            required: false,
+            fix: "install gst-plugins-good (the alpha plugin)",
+        },
+        Check {
             feature: "Wipe transitions",
             probe: "smpte",
             ok: el("smpte"),
             required: false,
             fix: "install gst-plugins-good (the smpte plugin)",
+        },
+        Check {
+            feature: "Region masks",
+            probe: "ffmpeg gblur",
+            ok: ffmpeg_has_filter("gblur"),
+            required: false,
+            fix: "install a standard ffmpeg (gblur ships in every stock build)",
         },
         Check {
             feature: "Voice cleanup",

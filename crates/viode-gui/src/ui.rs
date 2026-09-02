@@ -91,6 +91,9 @@ pub struct GuiApp {
     ramp_from: f64,
     ramp_to: f64,
     refit_to: f64,
+    mask_region: String,
+    mask_kind: String,
+    mask_follow: bool,
 }
 
 impl GuiApp {
@@ -160,6 +163,9 @@ impl GuiApp {
             ramp_from: 1.0,
             ramp_to: 2.0,
             refit_to: 60.0,
+            mask_region: "0.6,0.1,0.25,0.3".into(),
+            mask_kind: "blur".into(),
+            mask_follow: false,
         };
         app.missing = viode_core::media::missing(&app.editor.project, &app.project_dir);
         app
@@ -417,6 +423,41 @@ impl GuiApp {
                 let ph = self.state.playhead;
                 if self.editor.freeze(&dir, ph, Time(2_000_000_000)) {
                     self.model_changed();
+                }
+            }
+            Action::Mend => {
+                let dir = self.project_dir.clone();
+                let ph = self.state.playhead;
+                if self.editor.mend(&dir, ph) {
+                    self.model_changed();
+                }
+            }
+            Action::MatchPrevious => {
+                let dir = self.project_dir.clone();
+                if self.editor.match_previous(&dir) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            }
+            Action::BundleAdd => {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Viode project", &["viode"])
+                    .pick_file()
+                {
+                    match viode_core::Project::load(&path) {
+                        Ok(sub) if sub.total_duration() > Time::ZERO => {
+                            self.editor.snapshot_public();
+                            let dur = sub.total_duration();
+                            let clip = viode_core::Clip::media(path, Time::ZERO, dur);
+                            let _ = viode_core::ops::add(self.editor.project.main_mut(), clip);
+                            self.editor.dirty = true;
+                            self.editor.message =
+                                format!("bundled {} ({dur})", sub.project.name);
+                            self.model_changed();
+                        }
+                        Ok(_) => self.editor.message = "bundled project is empty".into(),
+                        Err(e) => self.editor.message = e.to_string(),
+                    }
                 }
             }
             Action::Captions => self.start_captions(),
@@ -1324,6 +1365,65 @@ impl GuiApp {
                     }
                 });
             }
+            if track != 0 {
+                ui.horizontal(|ui| {
+                    ui.label("matte");
+                    let current = clip.matte.clone().unwrap_or_else(|| "off".into());
+                    let mut sel = current.clone();
+                    egui::ComboBox::from_id_salt("matte")
+                        .selected_text(sel.clone())
+                        .show_ui(ui, |ui| {
+                            for m in ["off", "green", "blue"] {
+                                ui.selectable_value(&mut sel, m.to_string(), m);
+                            }
+                        });
+                    if sel != current {
+                        changed |= self
+                            .editor
+                            .set_matte((sel != "off").then_some(sel));
+                    }
+                });
+            }
+            ui.horizontal(|ui| {
+                ui.label("mask");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.mask_region)
+                        .hint_text("x,y,w,h")
+                        .desired_width(110.0),
+                );
+                egui::ComboBox::from_id_salt("mask_kind")
+                    .selected_text(self.mask_kind.clone())
+                    .show_ui(ui, |ui| {
+                        for k in ["blur", "pixelate"] {
+                            ui.selectable_value(&mut self.mask_kind, k.to_string(), k);
+                        }
+                    });
+                ui.checkbox(&mut self.mask_follow, "follow");
+                if ui.button("apply").clicked() {
+                    let parts: Vec<f64> = self
+                        .mask_region
+                        .split(',')
+                        .filter_map(|v| v.trim().parse().ok())
+                        .collect();
+                    if parts.len() == 4 {
+                        let mask = viode_core::Mask {
+                            region: [parts[0], parts[1], parts[2], parts[3]],
+                            kind: self.mask_kind.clone(),
+                            follow: self.mask_follow,
+                        };
+                        if self.editor.set_mask(Some(mask)) {
+                            self.editor.end_stage();
+                            self.model_changed();
+                        }
+                    } else {
+                        self.editor.message = "mask region: four numbers x,y,w,h".into();
+                    }
+                }
+                if clip.mask.is_some() && ui.button("clear").clicked() && self.editor.set_mask(None) {
+                    self.editor.end_stage();
+                    self.model_changed();
+                }
+            });
             ui.horizontal(|ui| {
                 ui.label("ramp");
                 ui.add(egui::DragValue::new(&mut self.ramp_from).speed(0.05).range(0.05..=20.0).prefix("from "));
@@ -1430,13 +1530,14 @@ impl GuiApp {
                 brightness: None,
                 contrast: None,
                 saturation: None,
-                hue: None,
+                hue: None, gamma: None,
             });
             for (label, field, cur, lo, hi) in [
                 ("brightness", "brightness", g.brightness.unwrap_or(0.0), -1.0, 1.0),
                 ("contrast", "contrast", g.contrast.unwrap_or(1.0), 0.0, 2.0),
                 ("saturation", "saturation", g.saturation.unwrap_or(1.0), 0.0, 2.0),
                 ("hue", "hue", g.hue.unwrap_or(0.0), -1.0, 1.0),
+                ("gamma", "gamma", g.gamma.unwrap_or(1.0), 0.1, 4.0),
             ] {
                 let mut v = cur;
                 if ui
@@ -1470,8 +1571,9 @@ impl GuiApp {
                     .selected_text(self.key_prop.clone())
                     .width(70.0)
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut self.key_prop, "volume".into(), "volume");
-                        ui.selectable_value(&mut self.key_prop, "alpha".into(), "alpha");
+                        for p in ["volume", "alpha", "x", "y", "scale"] {
+                            ui.selectable_value(&mut self.key_prop, p.into(), p);
+                        }
                     });
                 ui.add(egui::DragValue::new(&mut self.key_value).speed(0.05).range(0.0..=10.0));
                 if ui.small_button("+ at playhead").clicked() {
@@ -2091,6 +2193,8 @@ impl GuiApp {
         item(ui, Action::TrimInToPlayhead);
         item(ui, Action::TrimOutToPlayhead);
         item(ui, Action::Freeze);
+        item(ui, Action::Mend);
+        item(ui, Action::MatchPrevious);
         item(ui, Action::Delete);
         if track == 0 {
             ui.separator();
