@@ -5,6 +5,7 @@
 //! foreground mixes, so every Omarchy theme just works. Machines without
 //! Omarchy get a neutral dark fallback.
 
+use eframe::egui;
 use eframe::egui::Color32;
 
 #[derive(Clone, Copy)]
@@ -70,6 +71,38 @@ fn derive(a: Ansi) -> Palette {
         title: a.normal_yellow,
         wave: a.normal_blue,
     }
+}
+
+/// egui-wide visuals derived from the palette, so every button, panel,
+/// and dialog wears the Omarchy theme — not just the painter-drawn
+/// timeline. Applied by both the welcome screen and the editor.
+pub fn visuals(p: &Palette) -> egui::Visuals {
+    let mut v = egui::Visuals::dark();
+    v.override_text_color = Some(p.fg);
+    v.panel_fill = p.bg;
+    v.window_fill = p.bg;
+    v.extreme_bg_color = mix(p.bg, p.fg, 0.04);
+    v.faint_bg_color = mix(p.bg, p.fg, 0.06);
+    v.window_stroke = egui::Stroke::new(1.0, p.clip_edge);
+    v.selection.bg_fill = p.accent.gamma_multiply(0.35);
+    v.selection.stroke = egui::Stroke::new(1.0, p.accent);
+    v.hyperlink_color = p.accent;
+    v.widgets.noninteractive.bg_fill = p.bg;
+    v.widgets.noninteractive.fg_stroke = egui::Stroke::new(1.0, p.dim);
+    v.widgets.noninteractive.bg_stroke = egui::Stroke::new(1.0, p.lane);
+    v.widgets.inactive.bg_fill = mix(p.bg, p.fg, 0.10);
+    v.widgets.inactive.weak_bg_fill = mix(p.bg, p.fg, 0.10);
+    v.widgets.inactive.fg_stroke = egui::Stroke::new(1.0, p.fg);
+    v.widgets.hovered.bg_fill = mix(p.bg, p.accent, 0.25);
+    v.widgets.hovered.weak_bg_fill = mix(p.bg, p.accent, 0.25);
+    v.widgets.hovered.fg_stroke = egui::Stroke::new(1.5, p.fg);
+    v.widgets.hovered.bg_stroke = egui::Stroke::new(1.0, p.accent);
+    v.widgets.active.bg_fill = mix(p.bg, p.accent, 0.40);
+    v.widgets.active.weak_bg_fill = mix(p.bg, p.accent, 0.40);
+    v.widgets.active.fg_stroke = egui::Stroke::new(1.5, p.fg);
+    v.widgets.open.bg_fill = mix(p.bg, p.accent, 0.20);
+    v.widgets.open.weak_bg_fill = mix(p.bg, p.accent, 0.20);
+    v
 }
 
 fn mix(a: Color32, b: Color32, t: f32) -> Color32 {

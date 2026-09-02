@@ -236,6 +236,7 @@ impl WelcomeApp {
     /// One frame of the welcome screen. Returns the chosen project file
     /// once the user opens or creates one.
     pub fn update(&mut self, ctx: &egui::Context) -> Option<PathBuf> {
+        ctx.set_visuals(crate::theme::visuals(&self.theme));
         let mut chosen = None;
         if let Some(rx) = &self.pick_rx {
             match rx.try_recv() {

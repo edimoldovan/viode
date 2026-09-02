@@ -779,14 +779,6 @@ impl GuiApp {
                 self.theme.dim,
             );
         }
-        let dirty = if self.editor.dirty { "● " } else { "" };
-        painter.text(
-            Pos2::new(panel.right() - 88.0, y),
-            Align2::RIGHT_CENTER,
-            format!("{dirty}{}", self.editor.project.project.name),
-            FontId::proportional(11.0),
-            if self.editor.dirty { self.theme.accent } else { self.theme.dim },
-        );
     }
 
     /// The visible help trigger: a real button in the header, not a dim
@@ -1948,7 +1940,10 @@ impl GuiApp {
 
     fn draw_left_panel(&mut self, ui: &mut egui::Ui) {
         ui.add_space(6.0);
-        ui.label(egui::RichText::new(&self.editor.project.project.name).strong());
+        let dirty = if self.editor.dirty { " ●" } else { "" };
+        ui.label(
+            egui::RichText::new(format!("{}{dirty}", self.editor.project.project.name)).strong(),
+        );
         if !self.missing.is_empty() {
             let label = format!("⚠ {} media file(s) missing — relink…", self.missing.len());
             if ui
@@ -2950,6 +2945,7 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_visuals(crate::theme::visuals(&self.theme));
         // Artifacts finished in the background become visible this frame.
         self.media.pump();
         // Another process (an MCP session, the CLI) may have rewritten the

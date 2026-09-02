@@ -501,6 +501,7 @@ enum Cmd {
     Tui,
     /// Open the GUI: a project file or directory, the current directory's
     /// project, or the welcome screen when there is neither
+    #[command(alias = "ui")]
     Gui {
         /// Project file or project directory (as passed by file managers)
         path: Option<PathBuf>,
