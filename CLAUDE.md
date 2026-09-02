@@ -265,6 +265,19 @@ ruled them out permanently. Business analysis: MONETIZATION.md.
 Outside contributions require a signed grant to the company before
 merging.
 
+**License enforcement (2026-09-02).** Official binaries come from the
+PRIVATE crate at `../viode-license` — its own repo that, like PLAN.md,
+never travels with this one; this repo must never reference it. Its
+`viode` binary POSTs `{key, machine, version}` to
+`https://eduardmoldovan.com/api/viode/license` at startup and obeys the
+answer `{valid, plan, expires_at, message}`. The endpoint currently
+always returns `valid: true` — the structure is the contract, the
+policy comes later. Only an explicit `valid: false` disables the
+software; a network failure fails open so offline users are never
+locked out. To make this linkable, `viode-cli` is a library exposing
+`viode_cli::run()` plus a thin `main.rs`; public evaluation builds
+stay ungated.
+
 ## Stack decisions (settled — don't relitigate casually)
 
 - **Rust** + **GStreamer Editing Services (GES)** as the render/preview engine.
