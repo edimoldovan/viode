@@ -111,6 +111,27 @@ enum Pick {
     Folder(Option<PathBuf>),
 }
 
+/// Connect every AI client found on this machine; one plain sentence out.
+pub fn run_connect_all() -> String {
+    let statuses = viode_core::connect::detect();
+    let mut done = Vec::new();
+    for s in &statuses {
+        if !s.found {
+            continue;
+        }
+        if s.connected || viode_core::connect::connect(&s.id).is_ok() {
+            done.push(s.name.clone());
+        }
+    }
+    if done.is_empty() {
+        "No compatible AI app found — Viode works with Claude Desktop, Claude Code, \
+         Cursor, Windsurf, Gemini CLI, and opencode."
+            .into()
+    } else {
+        format!("Connected: {}. Restart the app, then just talk to it.", done.join(", "))
+    }
+}
+
 pub struct WelcomeApp {
     theme: crate::theme::Palette,
     recents: Vec<PathBuf>,
@@ -120,6 +141,10 @@ pub struct WelcomeApp {
     new_res: String,
     new_parent: PathBuf,
     pick_rx: Option<mpsc::Receiver<Pick>>,
+    /// Some(true) once every found AI client is connected; None until
+    /// first drawn. Drives the "Connect your AI" card.
+    ai_connected: Option<bool>,
+    connect_result: Option<String>,
 }
 
 impl WelcomeApp {
@@ -141,6 +166,8 @@ impl WelcomeApp {
             new_res: "1920x1080".into(),
             new_parent: if videos.is_dir() { videos } else { home },
             pick_rx: None,
+            ai_connected: None,
+            connect_result: None,
         }
     }
 
@@ -306,6 +333,30 @@ impl WelcomeApp {
                         if let Some(err) = &self.error {
                             ui.add_space(8.0);
                             ui.label(egui::RichText::new(err).color(theme.title));
+                        }
+
+                        // The AI card: one click connects every AI app
+                        // on this machine (Claude, Cursor, opencode, ...).
+                        let connected = *self.ai_connected.get_or_insert_with(|| {
+                            let s = viode_core::connect::detect();
+                            s.iter().any(|c| c.connected)
+                        });
+                        ui.add_space(16.0);
+                        if let Some(result) = &self.connect_result {
+                            ui.label(egui::RichText::new(result).color(theme.accent).size(11.0));
+                        } else if !connected {
+                            ui.label(
+                                egui::RichText::new(
+                                    "Viode can be driven by your AI assistant — \
+                                     it cuts, trims, and renders from plain conversation.",
+                                )
+                                .color(theme.dim)
+                                .size(11.0),
+                            );
+                            if ui.button("Connect your AI").clicked() {
+                                self.connect_result = Some(run_connect_all());
+                                self.ai_connected = None;
+                            }
                         }
 
                         // Recents.

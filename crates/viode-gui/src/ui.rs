@@ -70,6 +70,9 @@ pub struct GuiApp {
     /// Announcement from the developer, provided by the official
     /// binary's license check (VIODE_NOTICE). Empty in source builds.
     notice: String,
+    /// Whether any AI client on this machine already knows Viode —
+    /// drives the left-panel connect hint.
+    ai_connected: bool,
     palette: CmdPalette,
     show_doctor: bool,
     show_relink: bool,
@@ -145,6 +148,7 @@ impl GuiApp {
             missing: Vec::new(),
             engine_gaps: viode_core::doctor::problems(),
             notice: std::env::var("VIODE_NOTICE").unwrap_or_default(),
+            ai_connected: viode_core::connect::detect().iter().any(|c| c.connected),
             palette: CmdPalette::default(),
             show_doctor: false,
             show_relink: false,
@@ -475,6 +479,10 @@ impl GuiApp {
                 self.scope_key = None;
             }
             Action::EngineCheckup => self.show_doctor = true,
+            Action::ConnectAi => {
+                self.editor.message = crate::welcome::run_connect_all();
+                self.ai_connected = true;
+            }
             Action::CommandPalette => self.palette.open(),
             Action::Help => self.transport(Key::Help),
             Action::Quit => self.request_quit(ctx),
@@ -1867,6 +1875,15 @@ impl GuiApp {
                 );
             });
             ui.add_space(4.0);
+        }
+        if !self.ai_connected {
+            let ctx2 = ui.ctx().clone();
+            if ui
+                .button(egui::RichText::new("🤖 Let your AI edit for you — connect").size(11.0))
+                .clicked()
+            {
+                self.perform(&ctx2, Action::ConnectAi);
+            }
         }
         if !self.engine_gaps.is_empty() {
             let label = format!(

@@ -7,6 +7,7 @@ pub mod backend;
 pub mod bundle;
 pub mod captions;
 pub mod clean;
+pub mod connect;
 pub mod doctor;
 pub mod duck;
 pub mod export;

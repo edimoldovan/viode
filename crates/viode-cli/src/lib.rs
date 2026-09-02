@@ -139,6 +139,15 @@ enum Cmd {
         #[arg(long, default_value_t = 0)]
         track: usize,
     },
+    /// Connect Viode to the AI apps on this machine (Claude, Cursor,
+    /// opencode, ...) so you can edit by talking to them
+    Connect {
+        /// A specific client id (default: connect every one found)
+        client: Option<String>,
+        /// Print the manual config snippet for unlisted clients
+        #[arg(long)]
+        print: bool,
+    },
     /// Blur or pixelate a region of a clip (optionally tracking it)
     Mask {
         index: usize,
@@ -685,6 +694,43 @@ pub fn run() -> Result<()> {
             println!("clip {index} rate {rate} (timeline length {})", c.len());
             Ok(())
         }),
+        Cmd::Connect { client, print } => {
+            if print {
+                println!("Add this to your AI app's tool-server config:\n{}", viode_core::connect::snippet());
+                return Ok(());
+            }
+            if let Some(id) = client {
+                println!("{}", viode_core::connect::connect(&id)?);
+                return Ok(());
+            }
+            let statuses = viode_core::connect::detect();
+            let mut connected_any = false;
+            for s in &statuses {
+                if !s.found {
+                    continue;
+                }
+                if s.connected {
+                    println!("{} — already connected", s.name);
+                    connected_any = true;
+                    continue;
+                }
+                match viode_core::connect::connect(&s.id) {
+                    Ok(msg) => {
+                        println!("{msg}");
+                        connected_any = true;
+                    }
+                    Err(e) => println!("{}: {e}", s.name),
+                }
+            }
+            if !connected_any {
+                println!(
+                    "No compatible AI app found. Viode works with Claude Desktop, \
+                     Claude Code, Cursor, Windsurf, Gemini CLI, and opencode.\n\
+                     Install one, or use `viode connect --print` for the manual snippet."
+                );
+            }
+            Ok(())
+        }
         Cmd::Mask { index, region, kind, follow, off, track } => with_project(&cli.project, |p| {
             let t = ops::track_mut(p, track)?;
             let c = t.clips.get_mut(index).context("clip index out of range")?;

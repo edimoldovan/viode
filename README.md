@@ -426,6 +426,20 @@ viode cut-text 0 12 14      # delete segments 12-14 -> the video cuts itself
 Requires whisper.cpp (`pacman -S whisper.cpp`) and a ggml model
 (`VIODE_WHISPER_MODEL` or `--model`).
 
+## Connect your AI
+
+One command registers Viode with every AI app on the machine — Claude
+Desktop, Claude Code, Cursor, Windsurf, Gemini CLI, opencode:
+
+```
+viode connect
+```
+
+The GUI offers the same thing as a one-click card on the welcome
+screen. After a restart of the AI app, editing is a conversation:
+"cut the silence out of my podcast and give me a Short." Unknown
+client? `viode connect --print` emits the snippet to paste.
+
 ## AI editing over MCP
 
 `viode serve --mcp` speaks MCP on stdio. Register it with your client (for

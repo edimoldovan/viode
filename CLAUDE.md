@@ -339,6 +339,18 @@ four interfaces, doctor checks in-phase per the rules:
 - TUI: craft verbs are parametric; per the transcribe precedent they
   ship CLI/MCP/GUI. Doctor grew alpha + gblur checks (17 total).
 
+**`viode connect` (2026-09-02) — done.** The user never sees the
+letters MCP: `viode_core::connect` holds a registry of AI clients
+(Claude Desktop, Claude Code, Cursor, Windsurf, Gemini CLI, opencode
+— per-OS config paths, two JSON shapes) and writes Viode's server
+entry into each client's own config, idempotently, refusing configs
+it cannot parse. CLI `viode connect` (no args = connect everything
+found; `--print` = manual snippet), GUI welcome-screen card + editor
+left-panel hint + palette action ("Connect your AI"), doctor check.
+The registered command is the binary's own absolute path. User
+journey (Ed-approved): welcome card -> one click -> "restart your AI
+app and start talking."
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

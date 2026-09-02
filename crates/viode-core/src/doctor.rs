@@ -148,6 +148,14 @@ pub fn run() -> Vec<Check> {
             fix: "install mpv",
         },
         Check {
+            feature: "AI assistant connection",
+            probe: "viode connect",
+            ok: crate::connect::detect().iter().any(|c| c.connected),
+            required: false,
+            fix: "run `viode connect` to register Viode with the AI apps \
+                  on this machine (Claude, Cursor, opencode, ...)",
+        },
+        Check {
             feature: "Transcription and text-based editing",
             probe: "whisper.cpp",
             ok: binary("whisper-cli", "--help")
