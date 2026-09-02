@@ -56,8 +56,15 @@ fn find_model(explicit: Option<&Path>) -> Result<PathBuf, TranscribeError> {
     if let Ok(m) = std::env::var("VIODE_WHISPER_MODEL") {
         return Ok(PathBuf::from(m));
     }
-    // Common Arch/whisper.cpp locations.
-    for dir in ["/usr/share/whisper.cpp-model-base.en", "/usr/share/whisper.cpp"] {
+    // The user-writable location first, then common Arch/whisper.cpp ones.
+    let user_models = std::env::var("HOME")
+        .map(|h| format!("{h}/.local/share/viode/models"))
+        .unwrap_or_default();
+    for dir in [
+        user_models.as_str(),
+        "/usr/share/whisper.cpp-model-base.en",
+        "/usr/share/whisper.cpp",
+    ] {
         if let Ok(entries) = std::fs::read_dir(dir) {
             for e in entries.flatten() {
                 if e.path().extension().is_some_and(|x| x == "bin") {

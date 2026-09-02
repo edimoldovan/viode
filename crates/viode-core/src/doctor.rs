@@ -127,7 +127,38 @@ pub fn run() -> Vec<Check> {
             required: false,
             fix: "install whisper.cpp (Arch: pacman -S whisper-cpp)",
         },
+        Check {
+            feature: "Transcription model",
+            probe: "ggml model",
+            ok: whisper_model_present(),
+            required: false,
+            fix: "download a ggml model into ~/.local/share/viode/models                   (e.g. ggml-base.en.bin from                   huggingface.co/ggerganov/whisper.cpp) or set                   VIODE_WHISPER_MODEL",
+        },
     ]
+}
+
+fn whisper_model_present() -> bool {
+    if std::env::var("VIODE_WHISPER_MODEL").is_ok_and(|m| std::path::Path::new(&m).exists()) {
+        return true;
+    }
+    let user_models = std::env::var("HOME")
+        .map(|h| format!("{h}/.local/share/viode/models"))
+        .unwrap_or_default();
+    for dir in [
+        user_models.as_str(),
+        "/usr/share/whisper.cpp-model-base.en",
+        "/usr/share/whisper.cpp",
+    ] {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            if entries
+                .flatten()
+                .any(|e| e.path().extension().is_some_and(|x| x == "bin"))
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Only the failing checks.

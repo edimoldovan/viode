@@ -133,6 +133,10 @@ rust  ffmpeg  gstreamer  gst-editing-services  gst-plugins-{base,good,bad,ugly} 
 
 Optional: `gst-plugin-va` for hardware decode, `mpv` for TUI playback.
 
+Transcription also needs a ggml model: drop one (e.g. `ggml-base.en.bin`
+from huggingface.co/ggerganov/whisper.cpp) into
+`~/.local/share/viode/models`, or point `VIODE_WHISPER_MODEL` at it.
+
 After installing, run `viode doctor`: it checks every engine piece this
 machine has (GStreamer elements, ffmpeg, mpv, whisper.cpp) and names the
 exact package for anything missing. GStreamer builds differ per platform
