@@ -73,6 +73,59 @@ fn derive(a: Ansi) -> Palette {
     }
 }
 
+/// Watches the Omarchy theme for live switches: the current/theme link
+/// points at a different directory after `omarchy-theme-set`, so the
+/// canonical path (or the file's mtime) changes. Poll it cheaply and
+/// reload the palette in place — the GUI follows a theme switch like
+/// the rest of Omarchy, no restart.
+pub struct ThemeWatcher {
+    canon: Option<std::path::PathBuf>,
+    mtime: Option<std::time::SystemTime>,
+    last_check: std::time::Instant,
+}
+
+fn theme_file() -> Option<std::path::PathBuf> {
+    std::env::var_os("HOME").map(|home| {
+        std::path::Path::new(&home).join(".local/state/omarchy/current/theme/alacritty.toml")
+    })
+}
+
+fn theme_identity() -> (Option<std::path::PathBuf>, Option<std::time::SystemTime>) {
+    let Some(path) = theme_file() else { return (None, None) };
+    (
+        std::fs::canonicalize(&path).ok(),
+        std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
+    )
+}
+
+impl ThemeWatcher {
+    pub fn new() -> ThemeWatcher {
+        let (canon, mtime) = theme_identity();
+        ThemeWatcher { canon, mtime, last_check: std::time::Instant::now() }
+    }
+
+    /// A fresh palette when the theme changed since last asked.
+    pub fn changed(&mut self) -> Option<Palette> {
+        if self.last_check.elapsed() < std::time::Duration::from_secs(1) {
+            return None;
+        }
+        self.last_check = std::time::Instant::now();
+        let (canon, mtime) = theme_identity();
+        if canon == self.canon && mtime == self.mtime {
+            return None;
+        }
+        self.canon = canon;
+        self.mtime = mtime;
+        Some(load())
+    }
+}
+
+impl Default for ThemeWatcher {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// egui-wide visuals derived from the palette, so every button, panel,
 /// and dialog wears the Omarchy theme — not just the painter-drawn
 /// timeline. Applied by both the welcome screen and the editor.

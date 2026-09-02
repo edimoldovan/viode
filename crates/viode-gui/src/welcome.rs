@@ -145,6 +145,7 @@ pub struct WelcomeApp {
     /// first drawn. Drives the "Connect your AI" card.
     ai_connected: Option<bool>,
     connect_result: Option<String>,
+    theme_watch: crate::theme::ThemeWatcher,
 }
 
 impl WelcomeApp {
@@ -168,6 +169,7 @@ impl WelcomeApp {
             pick_rx: None,
             ai_connected: None,
             connect_result: None,
+            theme_watch: crate::theme::ThemeWatcher::new(),
         }
     }
 
@@ -236,7 +238,11 @@ impl WelcomeApp {
     /// One frame of the welcome screen. Returns the chosen project file
     /// once the user opens or creates one.
     pub fn update(&mut self, ctx: &egui::Context) -> Option<PathBuf> {
+        if let Some(palette) = self.theme_watch.changed() {
+            self.theme = palette;
+        }
         ctx.set_visuals(crate::theme::visuals(&self.theme));
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
         let mut chosen = None;
         if let Some(rx) = &self.pick_rx {
             match rx.try_recv() {

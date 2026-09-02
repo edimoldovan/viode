@@ -52,6 +52,7 @@ pub struct GuiApp {
     preview_seq: u64,
     file_mtime: Option<std::time::SystemTime>,
     last_mtime_check: std::time::Instant,
+    theme_watch: crate::theme::ThemeWatcher,
     reload_blocked_note: bool,
     /// Debounced pipeline rebuild after model edits. The build itself
     /// runs on the player's actor thread — the UI never blocks on it.
@@ -132,6 +133,7 @@ impl GuiApp {
                 .and_then(|m| m.modified())
                 .ok(),
             last_mtime_check: std::time::Instant::now(),
+            theme_watch: crate::theme::ThemeWatcher::new(),
             reload_blocked_note: false,
             editor: Editor::new(project),
             project_file,
@@ -2945,7 +2947,11 @@ impl GuiApp {
 
 impl eframe::App for GuiApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(palette) = self.theme_watch.changed() {
+            self.theme = palette;
+        }
         ctx.set_visuals(crate::theme::visuals(&self.theme));
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
         // Artifacts finished in the background become visible this frame.
         self.media.pump();
         // Another process (an MCP session, the CLI) may have rewritten the
