@@ -231,6 +231,14 @@ Linux and macOS) is stage 0, the immediate next work — only
 user-facing packaging waits. This supersedes the
 Phase 9 ordering below; details in the local-only PLAN.md.
 
+**CI (stage 0) — done (2026-09-02).** `.github/workflows/ci.yml`
+builds the workspace and runs the full suite with `--locked` on
+ubuntu-latest and macos-latest on every push and PR, toolchain pinned
+at 1.90.0 to match the gstreamer-rs 0.24 pin. Linux installs the
+GStreamer dev stack incl. GES from apt; macOS installs the Homebrew
+gstreamer monorepo formula — a green macOS job is also the answer to
+the "does brew ship GES" packaging risk. README carries the badge.
+
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
 users must be able to install on Linux, macOS, and Windows. Windows is
 PARKED until Ed starts a VM on Omarchy — do not begin Windows work

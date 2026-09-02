@@ -1,5 +1,7 @@
 # Viode
 
+[![CI](https://github.com/edimoldovan/viode/actions/workflows/ci.yml/badge.svg)](https://github.com/edimoldovan/viode/actions/workflows/ci.yml)
+
 ## **The mission: get Lex Fridman off macOS/Windows.**
 
 Ask anyone who's tried to leave Mac or Windows what's holding them back and

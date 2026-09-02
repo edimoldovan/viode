@@ -1,0 +1,62 @@
+# The CI half of the release spine: build the workspace and run the
+# full test suite on both shipping platforms. This is what keeps the
+# macOS side verified between hands-on sessions — media-dependent
+# tests generate their own clips with ffmpeg and self-skip when a
+# dependency is missing, so a green run here is a real verdict.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GStreamer and ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            libges-1.0-dev \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            ffmpeg
+
+      - name: Install GStreamer and ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gstreamer ffmpeg
+
+      # The toolchain is pinned: gstreamer-rs 0.24 is the last series
+      # supporting Rust 1.90, and the two are bumped together (see
+      # CLAUDE.md conventions).
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --workspace --locked
+
+      - name: Test
+        run: cargo test --workspace --locked
+        env:
+          VIODE_PREVIEW_SINK: fake
