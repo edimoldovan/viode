@@ -4,6 +4,10 @@
 
 **Website: [eduardmoldovan.com/viode](https://eduardmoldovan.com/viode)** — what Viode is, what it automates, and how to hear about the launch.
 
+> **Alpha software.** Viode works — everything documented below is real,
+> tested, and verified on Linux and macOS — but it is young. Expect
+> rough edges, keep originals of your footage, and report what breaks.
+
 ## **The mission: get Lex Fridman off macOS/Windows.**
 
 Ask anyone who's tried to leave Mac or Windows what's holding them back and
@@ -27,10 +31,8 @@ Viode is that editor, built Linux-first around three ideas:
   do — full feature parity with the CLI: it can cut, trim, place, grade,
   *look at frames and scopes*, read waveforms, and render.
 
-Today Viode ships a CLI, an MCP server, and a fast keyboard UI with real
-filmstrips and inline playback. They are all thin clients over one engine
-(`viode-core`) — a full graphical UI is a planned client of the same core,
-not a rewrite.
+Viode ships a CLI, an MCP server, a fast keyboard UI, and a desktop
+app — all thin clients over one engine (`viode-core`).
 
 ## Where Viode already beats Premiere
 
@@ -44,7 +46,7 @@ not a rewrite.
 | AI | none that matters | a first-class MCP client that can cut, trim, *look at frames*, read waveforms, and render |
 | Loudness-correct exports | know the right LUFS, configure it | `viode render --preset podcast` — two-pass EBU R128 built in |
 
-Every planned phase has shipped: playback (instant in-terminal AND live
+All of it ships today: playback (instant in-terminal AND live
 composited), audio mixing, keyframes, transforms/PiP, color with scopes,
 the full roll/slip/slide trim grammar, speed ramps with optical-flow
 smoothing, ProRes/DNxHR/HEVC/AV1 exports with a render queue, and media
@@ -275,7 +277,7 @@ to trim, `alt`+drag an edge to roll the cut, `alt`+drag the body to
 slip, `shift+alt`+drag to slide. The keyboard grammar carries over from
 the TUI: `s` split, `i`/`o` trim to playhead, `d` delete, `<`/`>` move,
 `t` title, `u`/`U` undo/redo, `w` save (quit asks about unsaved edits).
-An inspector panel edits every clip property from Phases 5-7 — speed,
+An inspector panel edits every clip property — speed,
 gain, pan, fades and wipes, position/scale/rotate/opacity, color grade,
 keyframes — plus full title editing. Edits rebuild the live preview in
 place, debounced, with single undo steps per slider gesture.
@@ -495,25 +497,6 @@ and the edit assembles itself in the window while the model works.
 - Proxies (540p) are built once and used automatically by playback,
   previews, frame grabs, and contact sheets.
 
-## Status
-
-| Phase | | |
-|---|---|---|
-| 0 | Engine spike (Rust + GES) | ✅ |
-| 1 | Cuts-only editor: model, TOML, CLI, dual render paths | ✅ |
-| 2 | MCP server with visual senses | ✅ |
-| 3 | Silence/scene detection, proxies, waveforms, export presets | ✅ |
-| 4 | The TUI | ✅ |
-| 5 | Multi-track, multicam, transcripts, effects & titles | ✅ |
-| 6 | Daily-driver gap: live playback, audio control, keyframes | ✅ |
-| 7 | Pro-work gap: transforms, color+scopes, trim grammar, speed, export breadth, live preview | ✅ |
-| 8 | The GUI (egui): viewer, full editing parity, the pro surface, macOS | ✅ |
-| 9 | `viode doctor` + engine capability policy, `viode connect` (one command into Claude/Cursor/opencode/...) | ✅ |
-| 10 | Discoverability: command palette, context menus, toolbar — every verb mouse-reachable | ✅ |
-| 11 | The creator wave: freeze, ramp, steady, captions, subject-aware reframe | ✅ |
-| 12 | The podcast wave: markers, ducking, voice cleanup, music refit, the angle wall | ✅ |
-| 13 | The craft wave: keyframed motion, chroma key, shot match + gamma, nested projects, jump-cut morph, tracking masks | ✅ |
-| 14 | Distribution: packages and installers for Linux and macOS | ⏳ |
 
 ## Development
 
