@@ -77,12 +77,23 @@ fn initialize(params: &Value) -> Value {
     // machine's gaps BEFORE it plans an edit (the `instructions` field is
     // shown to the client's model). A complete machine adds nothing.
     let problems = viode_core::doctor::problems();
+    let mut instructions = Vec::new();
     if let Some(summary) = viode_core::doctor::summary(&problems) {
-        result["instructions"] = json!(format!(
+        instructions.push(format!(
             "{summary} The doctor tool returns the full report; features \
              listed as missing will fail with actionable errors until \
              their piece is installed."
         ));
+    }
+    // Official binaries surface developer announcements here too, so the
+    // model can relay them to the user.
+    if let Ok(notice) = std::env::var("VIODE_NOTICE") {
+        if !notice.is_empty() {
+            instructions.push(format!("Announcement from the Viode developer: {notice}"));
+        }
+    }
+    if !instructions.is_empty() {
+        result["instructions"] = json!(instructions.join(" "));
     }
     result
 }

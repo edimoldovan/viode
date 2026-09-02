@@ -67,6 +67,9 @@ pub struct GuiApp {
     missing: Vec<(usize, usize, PathBuf)>,
     /// Engine gaps found once at startup (see viode_core::doctor).
     engine_gaps: Vec<viode_core::doctor::Check>,
+    /// Announcement from the developer, provided by the official
+    /// binary's license check (VIODE_NOTICE). Empty in source builds.
+    notice: String,
     palette: CmdPalette,
     show_doctor: bool,
     show_relink: bool,
@@ -141,6 +144,7 @@ impl GuiApp {
             key_value: 1.0,
             missing: Vec::new(),
             engine_gaps: viode_core::doctor::problems(),
+            notice: std::env::var("VIODE_NOTICE").unwrap_or_default(),
             palette: CmdPalette::default(),
             show_doctor: false,
             show_relink: false,
@@ -1851,6 +1855,18 @@ impl GuiApp {
             {
                 self.show_relink = true;
             }
+        }
+        if !self.notice.is_empty() {
+            let notice = self.notice.clone();
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new("📣").size(12.0));
+                ui.label(
+                    egui::RichText::new(notice)
+                        .color(self.theme.accent)
+                        .size(11.0),
+                );
+            });
+            ui.add_space(4.0);
         }
         if !self.engine_gaps.is_empty() {
             let label = format!(

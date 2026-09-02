@@ -33,6 +33,13 @@ pub fn run(project_file: &Path) -> Result<()> {
             gaps.len()
         );
     }
+    // Announcement from the developer (official binaries set VIODE_NOTICE
+    // from the license check; source builds never have it).
+    if let Ok(notice) = std::env::var("VIODE_NOTICE") {
+        if !notice.is_empty() {
+            app.message = format!("📣 {notice}");
+        }
+    }
     let mut terminal = ratatui::init();
     let result = event_loop(&mut terminal, &mut app);
     ratatui::restore();
