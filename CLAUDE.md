@@ -252,6 +252,19 @@ demos — use ONE Blender Studio film (Spring / Sprite Fright / Charge,
 titles before the next showcase render. Packaging still deferred by
 Ed's call.
 
+**The countdown to zero (2026-09-02).** PLAN.md now holds the complete
+list of Premiere Pro features Viode still lacks — each with its own
+plain-verb name (reframe, steady, mend, matte, duck, clean, refit,
+ramp, freeze, captions, mask/follow, bundle, mark, mix, publish, plus
+grade/key growth, the angle wall, and HDR), grouped into four waves
+ordered for market breadth: creator, podcast, craft, depth. Strategy
+behind the ordering: macOS next, Windows later, low subscription
+price needs a broad market — so implementations must use portable
+pieces only (GStreamer, ffmpeg, cross-platform inference), never a
+platform-exclusive dependency. Cloud collaboration, AE dynamic link,
+and 360/VR are deliberately excluded. If PLAN.md is not on this
+machine, ask Ed for it before starting countdown work.
+
 ## Ownership and licensing (settled)
 
 Eduard Moldovan AB owns the software. The repo license is PolyForm
