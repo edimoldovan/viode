@@ -161,13 +161,14 @@ done
 say "rewriting install names"
 rewrite() {
     local macho="$1"
+    echo "rewriting: $macho"
     chmod u+w "$macho"
     if [[ "$macho" == *.dylib ]]; then
-        install_name_tool -id "@rpath/$(basename "$macho")" "$macho" 2> /dev/null
+        install_name_tool -id "@rpath/$(basename "$macho")" "$macho"
     fi
     while IFS= read -r dep; do
         [[ -z "$dep" ]] && continue
-        install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$macho" 2> /dev/null
+        install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$macho"
     done < <(deps_of "$macho")
     # Helpers and the main binary sit one level below Contents; the
     # same relative rpath serves both. Libraries and plugins resolve
@@ -176,7 +177,7 @@ rewrite() {
     install_name_tool -add_rpath "@executable_path/../Frameworks/lib" "$macho" 2> /dev/null || true
     install_name_tool -add_rpath "@loader_path/../lib" "$macho" 2> /dev/null || true
     install_name_tool -add_rpath "@loader_path" "$macho" 2> /dev/null || true
-    codesign --force -s "$SIGN_IDENTITY" "$macho" 2> /dev/null
+    codesign --force -s "$SIGN_IDENTITY" "$macho"
 }
 while IFS= read -r -d '' macho; do
     # Plain `grep && rewrite` would return 1 on every non-Mach-O file
