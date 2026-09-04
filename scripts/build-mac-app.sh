@@ -129,6 +129,9 @@ say "collecting the engine"
 # ones, skip the dead ones.
 for plugin in "$BREW/lib/gstreamer-1.0/"*.dylib; do
     [[ -e "$plugin" ]] || continue
+    # The python plugin loader would drag the entire Python framework
+    # into the bundle; Viode uses no Python.
+    [[ "$(basename "$plugin")" == "libgstpython.dylib" ]] && continue
     cp -L "$plugin" "$C/PlugIns/gstreamer-1.0/"
 done
 cp "$SOUNDTOUCH_DYLIB" "$C/PlugIns/gstreamer-1.0/"
