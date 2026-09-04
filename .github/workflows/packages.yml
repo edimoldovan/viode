@@ -125,6 +125,62 @@ jobs:
           viode --version
           viode doctor
 
+  # The self-contained Mac app: the bundle build relocates the whole
+  # engine into Viode.app and hard-fails if any binary inside still
+  # references Homebrew, then runs the bundled doctor against the
+  # bundled plugins. Pushes iterate fast (no models, core ffmpeg);
+  # the tagged build is the real thing — FULL_ENGINE with the
+  # vidstab ffmpeg, models inside, dmg staged on the draft release.
+  # Signing/notarization activates once Ed provisions the Apple
+  # certificates in the repo secrets.
+  mac-app:
+    runs-on: macos-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the engine and build tools
+        run: |
+          brew install gstreamer ffmpeg librsvg meson ninja pkgconf sound-touch whisper-cpp
+
+      - name: Swap in the vidstab ffmpeg (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          brew uninstall --ignore-dependencies ffmpeg
+          brew tap homebrew-ffmpeg/ffmpeg
+          brew install homebrew-ffmpeg/ffmpeg/ffmpeg --with-libvidstab
+
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: "Build the bundle (push: fast iteration)"
+        if: "!startsWith(github.ref, 'refs/tags/v')"
+        run: SKIP_MODELS=1 ./scripts/build-mac-app.sh
+
+      - name: "Build the bundle (tag: full engine)"
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: FULL_ENGINE=1 VERSION="${GITHUB_REF_NAME#v}" ./scripts/build-mac-app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-app
+          path: dist/*.dmg
+
+      - name: Stage on the draft release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Viode $GITHUB_REF_NAME" \
+            --notes "Draft — published when every installer is attached and verified." \
+            2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --clobber
+
   # The AUR package must keep building from a plain source tarball; the
   # PKGBUILD's build and package steps run here against this commit in
   # an Arch container, so a broken PKGBUILD fails the push that broke

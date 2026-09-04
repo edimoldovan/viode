@@ -580,10 +580,51 @@ enum TrackCmd {
     Off { index: usize },
 }
 
+/// When the binary lives inside Viode.app (…/Contents/MacOS/viode),
+/// the bundle carries the entire engine: GStreamer plugins and
+/// libraries in Contents/Frameworks, ffmpeg/ffprobe/whisper-cli in
+/// Contents/Helpers, and the speech and face models in
+/// Contents/Resources/models. Point every engine piece at the bundle
+/// before anything initializes GStreamer or shells out. Environment
+/// the user set explicitly always wins; outside a bundle this is a
+/// no-op, so brew and source builds are untouched.
+#[cfg(target_os = "macos")]
+fn adopt_bundle_engine() {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let Some(macos_dir) = exe.parent() else { return };
+    if macos_dir.file_name().and_then(|n| n.to_str()) != Some("MacOS") {
+        return;
+    }
+    let Some(contents) = macos_dir.parent() else { return };
+    if contents.file_name().and_then(|n| n.to_str()) != Some("Contents") {
+        return;
+    }
+    let set_if_unset = |key: &str, value: PathBuf| {
+        if std::env::var_os(key).is_none() && value.exists() {
+            std::env::set_var(key, value);
+        }
+    };
+    let plugins = contents.join("Frameworks/gstreamer-1.0");
+    set_if_unset("GST_PLUGIN_PATH", plugins.clone());
+    // Without this the registry would also scan brew paths on machines
+    // that have them, mixing two GStreamer builds in one process.
+    set_if_unset("GST_PLUGIN_SYSTEM_PATH", plugins);
+    set_if_unset("GST_PLUGIN_SCANNER", contents.join("Helpers/gst-plugin-scanner"));
+    set_if_unset("VIODE_WHISPER_MODEL", contents.join("Resources/models/ggml-base.en.bin"));
+    set_if_unset("VIODE_FACE_MODEL", contents.join("Resources/models/seeta_fd_frontal_v1.0.bin"));
+    let helpers = contents.join("Helpers");
+    if helpers.is_dir() {
+        let path = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{path}", helpers.display()));
+    }
+}
+
 /// Parse the command line and execute the chosen verb. This is the whole
 /// CLI as a library call so that other binaries (the official licensed
 /// build lives in a separate private crate) can embed it unchanged.
 pub fn run() -> Result<()> {
+    #[cfg(target_os = "macos")]
+    adopt_bundle_engine();
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::New { name, fps, res } => cmd_new(&name, fps, &res),
