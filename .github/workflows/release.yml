@@ -88,7 +88,7 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" --verify-tag \
             --title "Viode $GITHUB_REF_NAME" \
-            --notes "Prebuilt binaries. These need the engine installed alongside — GStreamer (with Editing Services) and ffmpeg; see the README's install section. Run \`viode doctor\` after installing." \
+            --notes "Raw binaries for packagers and for people comfortable managing their own system: they expect GStreamer (with Editing Services) and ffmpeg to be present, and \`viode doctor\` names anything missing. Everyone else: use the installers, which bring everything they need." \
             2>/dev/null || true
           gh release upload "$GITHUB_REF_NAME" \
             viode-*.tar.gz viode-*.tar.gz.sha256 --clobber
