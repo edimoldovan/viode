@@ -128,43 +128,71 @@ fi
 say "collecting the engine"
 # brew's plugin dir holds symlinks into the Cellar, some dangling
 # (plugins whose backing formula is not installed). Resolve the live
-# ones, skip the dead ones.
+# ones, skip the dead ones. Excluded on purpose: the python loader
+# (drags the whole Python framework in; Viode uses no Python) and the
+# gtk plugins (Viode's GUI is egui; gtk drags a desktop's worth of
+# libraries in).
 for plugin in "$BREW/lib/gstreamer-1.0/"*.dylib; do
     [[ -e "$plugin" ]] || continue
-    # The python plugin loader would drag the entire Python framework
-    # into the bundle; Viode uses no Python.
-    [[ "$(basename "$plugin")" == "libgstpython.dylib" ]] && continue
+    case "$(basename "$plugin")" in
+        libgstpython.dylib | libgstgtk*.dylib) continue ;;
+    esac
     cp -L "$plugin" "$C/Frameworks/"
 done
 cp "$SOUNDTOUCH_DYLIB" "$C/Frameworks/"
 for helper in ffmpeg ffprobe; do
     cp "$(command -v $helper)" "$C/Helpers/$helper"
 done
-if command -v whisper-cli > /dev/null; then
-    cp "$(command -v whisper-cli)" "$C/Helpers/whisper-cli"
-fi
 SCANNER="$BREW/libexec/gstreamer-1.0/gst-plugin-scanner"
 [[ -f "$SCANNER" ]] && cp "$SCANNER" "$C/Helpers/gst-plugin-scanner"
 
-# Breadth-first crawl: every Mach-O in the bundle pulls the brew
-# libraries it references into Frameworks/lib until the set is closed.
+# Dependencies land per destination. Everything GStreamer might scan
+# lives in Frameworks — but whisper-cli's ggml libraries must NOT:
+# the registry scan dlopens every dylib in its path, and ggml's
+# static initializers abort the host process. whisper-cli therefore
+# keeps its private libraries flat in Helpers, which GStreamer never
+# scans (they resolve via the @loader_path rpath).
 deps_of() { otool -L "$1" | awk 'NR>1 {print $1}' | grep -E "^($BREW|/usr/local)" || true; }
+rpath_deps_of() { otool -L "$1" | awk 'NR>1 {print $1}' | grep '^@rpath/' || true; }
+
+# crawl_into <dest dir> <seed...>: pull referenced brew libraries into
+# dest until the set is closed. Handles both absolute brew paths and
+# @rpath references whose backing file lives in $BREW/lib (brew links
+# some libraries that way — libsharpyuv taught us).
+crawl_into() {
+    local dest="$1"
+    shift
+    local queue=("$@") next=()
+    while ((${#queue[@]})); do
+        next=()
+        for macho in "${queue[@]}"; do
+            while IFS= read -r dep; do
+                [[ -z "$dep" ]] && continue
+                local src="$dep"
+                [[ "$dep" == @rpath/* ]] && src="$BREW/lib/${dep#@rpath/}"
+                [[ -e "$src" ]] || continue
+                local leaf="$(basename "$src")"
+                if [[ ! -e "$dest/$leaf" ]]; then
+                    cp "$(readlink -f "$src")" "$dest/$leaf"
+                    chmod u+w "$dest/$leaf"
+                    next+=("$dest/$leaf")
+                fi
+            done < <(
+                deps_of "$macho"
+                rpath_deps_of "$macho"
+            )
+        done
+        queue=("${next[@]+"${next[@]}"}")
+    done
+}
+
 say "crawling dylib dependencies"
-while :; do
-    added=0
-    while IFS= read -r -d '' macho; do
-        while IFS= read -r dep; do
-            [[ -z "$dep" ]] && continue
-            leaf="$(basename "$dep")"
-            if [[ ! -e "$C/Frameworks/$leaf" ]]; then
-                cp "$(readlink -f "$dep")" "$C/Frameworks/$leaf"
-                chmod u+w "$C/Frameworks/$leaf"
-                added=1
-            fi
-        done < <(deps_of "$macho")
-    done < <(find "$C" -type f \( -perm -111 -o -name '*.dylib' \) -print0)
-    [[ "$added" == "0" ]] && break
-done
+seeds=("$C/MacOS/viode" "$C"/Helpers/* "$C"/Frameworks/*.dylib)
+crawl_into "$C/Frameworks" "${seeds[@]}"
+if command -v whisper-cli > /dev/null; then
+    cp "$(command -v whisper-cli)" "$C/Helpers/whisper-cli"
+    crawl_into "$C/Helpers" "$C/Helpers/whisper-cli"
+fi
 
 say "rewriting install names"
 rewrite() {
@@ -209,6 +237,17 @@ while IFS= read -r -d '' macho; do
         otool -L "$macho" | grep -E "$BREW|/usr/local" >&2
         leaks=1
     fi
+    # Every @rpath reference must resolve inside the bundle, or it
+    # becomes a dlopen failure on the user's machine.
+    while IFS= read -r dep; do
+        [[ -z "$dep" ]] && continue
+        leaf="${dep#@rpath/}"
+        if [[ ! -e "$C/Frameworks/$leaf" && ! -e "$C/Helpers/$leaf" &&
+            ! -e "$(dirname "$macho")/$leaf" && "$leaf" != "$(basename "$macho")" ]]; then
+            echo "MISSING @rpath dependency $leaf (referenced by $macho)" >&2
+            leaks=1
+        fi
+    done < <(rpath_deps_of "$macho")
 done < <(find "$C" -type f -print0)
 [[ "$leaks" == "0" ]] || { echo "bundle still references Homebrew — not self-contained" >&2; exit 1; }
 
