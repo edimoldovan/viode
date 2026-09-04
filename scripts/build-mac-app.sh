@@ -121,7 +121,13 @@ fi
 
 # ------------------------------------------------------------ relocation
 say "collecting the engine"
-cp "$BREW/lib/gstreamer-1.0/"*.dylib "$C/Frameworks/gstreamer-1.0/"
+# brew's plugin dir holds symlinks into the Cellar, some dangling
+# (plugins whose backing formula is not installed). Resolve the live
+# ones, skip the dead ones.
+for plugin in "$BREW/lib/gstreamer-1.0/"*.dylib; do
+    [[ -e "$plugin" ]] || continue
+    cp -L "$plugin" "$C/Frameworks/gstreamer-1.0/"
+done
 cp "$SOUNDTOUCH_DYLIB" "$C/Frameworks/gstreamer-1.0/"
 for helper in ffmpeg ffprobe; do
     cp "$(command -v $helper)" "$C/Helpers/$helper"

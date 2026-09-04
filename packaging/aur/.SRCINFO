@@ -1,0 +1,25 @@
+pkgbase = viode
+	pkgdesc = AI-native video editor: desktop app, terminal UI, CLI, and an AI connection over one engine
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/edimoldovan/viode
+	arch = x86_64
+	arch = aarch64
+	license = LicenseRef-PolyForm-Free-Trial-1.0.0
+	makedepends = cargo
+	makedepends = librsvg
+	depends = gstreamer
+	depends = gst-plugins-base
+	depends = gst-plugins-good
+	depends = gst-plugins-bad
+	depends = gst-plugins-ugly
+	depends = gst-libav
+	depends = gst-editing-services
+	depends = ffmpeg
+	optdepends = mpv: inline playback in the terminal UI
+	optdepends = gst-plugin-va: hardware decode/encode (opt-in via VIODE_HWACCEL after viode bench)
+	optdepends = whisper.cpp: transcription, edit-by-text, and captions
+	source = viode-0.1.0.tar.gz::https://github.com/edimoldovan/viode/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = viode
