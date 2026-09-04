@@ -1,0 +1,94 @@
+# The tagged half of the release spine: pushing a v* tag builds release
+# binaries on both shipping platforms, runs the full test suite as a
+# final gate, and attaches the artifacts to a GitHub Release. The
+# release page is where every download lives — the marketing page and
+# the package managers all point here, and /releases/latest never needs
+# a version bump anywhere else.
+#
+# These are evaluation builds from this public repository. Official
+# license-checking builds (the private viode-license wrapper) join this
+# workflow once that crate has a remote and a deploy key in the Actions
+# secrets — see docs/RELEASING.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact: linux-x86_64
+          - os: macos-latest
+            artifact: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install GStreamer and ffmpeg (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            libges-1.0-dev \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-plugins-bad \
+            gstreamer1.0-plugins-ugly \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
+            ffmpeg
+
+      - name: Install GStreamer and ffmpeg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install gstreamer ffmpeg
+
+      # Same pin as CI: gstreamer-rs 0.24 is the last series supporting
+      # Rust 1.90, and the two are bumped together.
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --workspace --locked
+        env:
+          VIODE_PREVIEW_SINK: fake
+
+      - name: Build release binary
+        run: cargo build --release --locked -p viode-cli
+
+      - name: Package
+        run: |
+          name="viode-${GITHUB_REF_NAME}-${{ matrix.artifact }}"
+          mkdir "$name"
+          cp target/release/viode "$name/"
+          cp README.md LICENSE "$name/"
+          tar czf "$name.tar.gz" "$name"
+          shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256"
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag \
+            --title "Viode $GITHUB_REF_NAME" \
+            --notes "Prebuilt binaries. These need the engine installed alongside — GStreamer (with Editing Services) and ffmpeg; see the README's install section. Run \`viode doctor\` after installing." \
+            2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" \
+            viode-*.tar.gz viode-*.tar.gz.sha256 --clobber
