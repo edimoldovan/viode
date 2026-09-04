@@ -179,7 +179,11 @@ rewrite() {
     codesign --force -s "$SIGN_IDENTITY" "$macho" 2> /dev/null
 }
 while IFS= read -r -d '' macho; do
-    file "$macho" | grep -q Mach-O && rewrite "$macho"
+    # Plain `grep && rewrite` would return 1 on every non-Mach-O file
+    # and set -e would kill the whole build on the first plist.
+    if file "$macho" | grep -q Mach-O; then
+        rewrite "$macho"
+    fi
 done < <(find "$C" -type f -print0)
 
 say "self-containment check"
