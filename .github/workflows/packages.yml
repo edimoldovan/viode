@@ -118,10 +118,12 @@ jobs:
         run: |
           git archive --prefix=viode-0.1.0/ -o /tmp/viode-0.1.0.tar.gz HEAD
           sha="$(shasum -a 256 /tmp/viode-0.1.0.tar.gz | cut -d' ' -f1)"
+          brew tap-new --no-git local/viode
           sed -e "s|^  url .*|  url \"file:///tmp/viode-0.1.0.tar.gz\"|" \
               -e "s|^  sha256 .*|  sha256 \"$sha\"|" \
-              packaging/homebrew/viode.rb > /tmp/viode.rb
-          brew install --build-from-source --formula /tmp/viode.rb
+              packaging/homebrew/viode.rb \
+              > "$(brew --repository)/Library/Taps/local/homebrew-viode/Formula/viode.rb"
+          brew install --build-from-source local/viode/viode
           viode --version
           viode doctor
 
