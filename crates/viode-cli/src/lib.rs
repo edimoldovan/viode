@@ -604,7 +604,7 @@ fn adopt_bundle_engine() {
             std::env::set_var(key, value);
         }
     };
-    let plugins = contents.join("Frameworks/gstreamer-1.0");
+    let plugins = contents.join("PlugIns/gstreamer-1.0");
     set_if_unset("GST_PLUGIN_PATH", plugins.clone());
     // Without this the registry would also scan brew paths on machines
     // that have them, mixing two GStreamer builds in one process.

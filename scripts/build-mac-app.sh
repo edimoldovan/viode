@@ -38,7 +38,10 @@ say "release binary"
 cargo build --release --locked -p viode-cli
 
 say "bundle skeleton"
-rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks/gstreamer-1.0,Frameworks/lib,Resources/models,Helpers}
+# Canonical bundle layout: shared libraries flat in Frameworks (a bare
+# subdirectory there is not a valid codesign subcomponent), plugins in
+# PlugIns/gstreamer-1.0, helper executables in Helpers.
+rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks,PlugIns/gstreamer-1.0,Resources/models,Helpers}
 cp target/release/viode "$C/MacOS/viode"
 
 cat > "$C/Info.plist" <<PLIST
@@ -126,9 +129,9 @@ say "collecting the engine"
 # ones, skip the dead ones.
 for plugin in "$BREW/lib/gstreamer-1.0/"*.dylib; do
     [[ -e "$plugin" ]] || continue
-    cp -L "$plugin" "$C/Frameworks/gstreamer-1.0/"
+    cp -L "$plugin" "$C/PlugIns/gstreamer-1.0/"
 done
-cp "$SOUNDTOUCH_DYLIB" "$C/Frameworks/gstreamer-1.0/"
+cp "$SOUNDTOUCH_DYLIB" "$C/PlugIns/gstreamer-1.0/"
 for helper in ffmpeg ffprobe; do
     cp "$(command -v $helper)" "$C/Helpers/$helper"
 done
@@ -148,9 +151,9 @@ while :; do
         while IFS= read -r dep; do
             [[ -z "$dep" ]] && continue
             leaf="$(basename "$dep")"
-            if [[ ! -e "$C/Frameworks/lib/$leaf" ]]; then
-                cp "$(readlink -f "$dep")" "$C/Frameworks/lib/$leaf"
-                chmod u+w "$C/Frameworks/lib/$leaf"
+            if [[ ! -e "$C/Frameworks/$leaf" ]]; then
+                cp "$(readlink -f "$dep")" "$C/Frameworks/$leaf"
+                chmod u+w "$C/Frameworks/$leaf"
                 added=1
             fi
         done < <(deps_of "$macho")
@@ -171,13 +174,18 @@ rewrite() {
         install_name_tool -change "$dep" "@rpath/$(basename "$dep")" "$macho"
     done < <(deps_of "$macho")
     # Helpers and the main binary sit one level below Contents; the
-    # same relative rpath serves both. Libraries and plugins resolve
-    # through the loading process but get a loader-relative rpath too,
-    # so the scanner (its own process) can load plugins alone.
-    install_name_tool -add_rpath "@executable_path/../Frameworks/lib" "$macho" 2> /dev/null || true
-    install_name_tool -add_rpath "@loader_path/../lib" "$macho" 2> /dev/null || true
+    # same relative rpath serves both. Plugins live two levels down in
+    # PlugIns/gstreamer-1.0; libraries in Frameworks find siblings via
+    # @loader_path.
+    install_name_tool -add_rpath "@executable_path/../Frameworks" "$macho" 2> /dev/null || true
+    install_name_tool -add_rpath "@loader_path/../../Frameworks" "$macho" 2> /dev/null || true
     install_name_tool -add_rpath "@loader_path" "$macho" 2> /dev/null || true
-    codesign --force -s "$SIGN_IDENTITY" "$macho"
+    # The bundle's main executable is sealed by the final bundle sign;
+    # signing it alone makes codesign treat the whole (half-signed)
+    # bundle as its target and fail.
+    if [[ "$macho" != "$C/MacOS/viode" ]]; then
+        codesign --force -s "$SIGN_IDENTITY" "$macho"
+    fi
 }
 while IFS= read -r -d '' macho; do
     # Plain `grep && rewrite` would return 1 on every non-Mach-O file
