@@ -604,7 +604,11 @@ fn adopt_bundle_engine() {
             std::env::set_var(key, value);
         }
     };
-    let plugins = contents.join("PlugIns/gstreamer-1.0");
+    // Plugins sit flat in Frameworks next to the libraries: codesign
+    // rejects bare directories inside Frameworks and PlugIns alike,
+    // and GStreamer happily scans a directory that also holds
+    // non-plugin dylibs (they are just blacklisted in the registry).
+    let plugins = contents.join("Frameworks");
     set_if_unset("GST_PLUGIN_PATH", plugins.clone());
     // Without this the registry would also scan brew paths on machines
     // that have them, mixing two GStreamer builds in one process.

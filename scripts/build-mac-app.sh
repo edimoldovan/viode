@@ -38,10 +38,12 @@ say "release binary"
 cargo build --release --locked -p viode-cli
 
 say "bundle skeleton"
-# Canonical bundle layout: shared libraries flat in Frameworks (a bare
-# subdirectory there is not a valid codesign subcomponent), plugins in
-# PlugIns/gstreamer-1.0, helper executables in Helpers.
-rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks,PlugIns/gstreamer-1.0,Resources/models,Helpers}
+# Bundle layout: EVERYTHING dylib — libraries and GStreamer plugins —
+# sits flat in Contents/Frameworks. codesign rejects bare directories
+# inside Frameworks and PlugIns alike (only real nested bundles may
+# live there), and GStreamer happily scans a directory that also
+# holds non-plugin dylibs. Helper executables go to Contents/Helpers.
+rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks,Resources/models,Helpers}
 cp target/release/viode "$C/MacOS/viode"
 
 cat > "$C/Info.plist" <<PLIST
@@ -132,9 +134,9 @@ for plugin in "$BREW/lib/gstreamer-1.0/"*.dylib; do
     # The python plugin loader would drag the entire Python framework
     # into the bundle; Viode uses no Python.
     [[ "$(basename "$plugin")" == "libgstpython.dylib" ]] && continue
-    cp -L "$plugin" "$C/PlugIns/gstreamer-1.0/"
+    cp -L "$plugin" "$C/Frameworks/"
 done
-cp "$SOUNDTOUCH_DYLIB" "$C/PlugIns/gstreamer-1.0/"
+cp "$SOUNDTOUCH_DYLIB" "$C/Frameworks/"
 for helper in ffmpeg ffprobe; do
     cp "$(command -v $helper)" "$C/Helpers/$helper"
 done
