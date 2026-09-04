@@ -43,7 +43,10 @@ say "bundle skeleton"
 # inside Frameworks and PlugIns alike (only real nested bundles may
 # live there), and GStreamer happily scans a directory that also
 # holds non-plugin dylibs. Helper executables go to Contents/Helpers.
-rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks,Resources/models,Helpers}
+rm -rf dist && mkdir -p "$C"/{MacOS,Frameworks,Resources/models,Resources/gio-modules,Helpers}
+# An empty, existing GIO_MODULE_DIR keeps gio from loading modules
+# from its compiled-in Homebrew path (see adopt_bundle_engine).
+touch "$C/Resources/gio-modules/.keep"
 cp target/release/viode "$C/MacOS/viode"
 
 cat > "$C/Info.plist" <<PLIST
@@ -192,6 +195,12 @@ crawl_into "$C/Frameworks" "${seeds[@]}"
 if command -v whisper-cli > /dev/null; then
     cp "$(command -v whisper-cli)" "$C/Helpers/whisper-cli"
     crawl_into "$C/Helpers" "$C/Helpers/whisper-cli"
+fi
+# mpv drives inline playback in the terminal UI; bundle it the same
+# way so the doctor row is green out of the box.
+if command -v mpv > /dev/null; then
+    cp "$(command -v mpv)" "$C/Helpers/mpv"
+    crawl_into "$C/Helpers" "$C/Helpers/mpv"
 fi
 
 say "rewriting install names"

@@ -461,6 +461,33 @@ already folded into PLAN-MAC.md: .dmg delivery, models bundled in
 Contents/Resources, completeness acceptance = all-green doctor on a
 brew-less Mac.
 
+**The installers (2026-09-04) — built and CI-gated.** The Packages
+workflow proves every installer on every push, each gate ending in
+`viode doctor`: the .deb installs in clean Ubuntu, the .rpm in clean
+Fedora with RPM Fusion (their GES package is `gst-editing-services` —
+a container told us, not a guess), the AUR PKGBUILD builds and
+installs in clean Arch (`packaging/aur/`, .SRCINFO included), the
+Homebrew formula (`packaging/homebrew/viode.rb`) builds via a local
+tap on macOS, and `scripts/build-mac-app.sh` produces the
+self-contained Viode.app + .dmg. Mac bundle truths (each cost a CI
+run): loose dylibs must sit FLAT in Contents/Frameworks (codesign
+rejects bare subdirectories in Frameworks/PlugIns; plugins share the
+flat dir — GStreamer happily scans past non-plugins), the main
+executable is sealed only by the final bundle sign, the registry scan
+dlopens EVERYTHING in its path so whisper's ggml libraries (abort-on-
+load initializers) live quarantined in Contents/Helpers with mpv,
+brew references some libs only via @rpath (crawl follows them; the
+self-containment check fails on unresolved @rpath), the python/gtk
+plugin loaders stay out, and GIO_MODULE_DIR pins to an empty bundle
+dir or gio mixes two glibs. `adopt_bundle_engine` in viode-cli makes
+the binary self-locating inside the .app. Push builds skip models +
+vidstab-ffmpeg for speed; tag builds are FULL_ENGINE and stage
+.deb/.rpm/.dmg on a DRAFT release. docs/RELEASING.md is the runbook.
+Remaining for v0.1.0, all Ed-side: Apple signing certs into Actions
+secrets (until then ad-hoc — Gatekeeper will warn), AUR account +
+first push, create the empty edimoldovan/homebrew-viode tap repo,
+and the hands-on .dmg check on a brew-less Mac.
+
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
 users must be able to install on Linux, macOS, and Windows. Windows is
 PARKED until Ed starts a VM on Omarchy — do not begin Windows work

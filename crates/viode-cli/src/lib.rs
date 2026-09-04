@@ -614,6 +614,9 @@ fn adopt_bundle_engine() {
     // that have them, mixing two GStreamer builds in one process.
     set_if_unset("GST_PLUGIN_SYSTEM_PATH", plugins);
     set_if_unset("GST_PLUGIN_SCANNER", contents.join("Helpers/gst-plugin-scanner"));
+    // gio would otherwise dlopen module libraries from its compiled-in
+    // Homebrew path, mixing two glib builds in one process.
+    set_if_unset("GIO_MODULE_DIR", contents.join("Resources/gio-modules"));
     set_if_unset("VIODE_WHISPER_MODEL", contents.join("Resources/models/ggml-base.en.bin"));
     set_if_unset("VIODE_FACE_MODEL", contents.join("Resources/models/seeta_fd_frontal_v1.0.bin"));
     let helpers = contents.join("Helpers");
