@@ -1,0 +1,62 @@
+# Maintainer: Eduard Moldovan <himself@eduardmoldovan.com>
+#
+# The Arch install story: dependencies are declared, pacman brings the
+# whole engine, and `viode doctor` comes up green with no manual steps.
+# Release gating lives in CI (the full suite runs on every push and on
+# the tag), so this build skips a check() — an AUR build on a user's
+# machine should not re-run a media test suite.
+
+pkgname=viode
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="AI-native video editor: desktop app, terminal UI, CLI, and an AI connection over one engine"
+arch=('x86_64' 'aarch64')
+url="https://github.com/edimoldovan/viode"
+license=('LicenseRef-PolyForm-Free-Trial-1.0.0')
+depends=(
+  'gstreamer'
+  'gst-plugins-base'
+  'gst-plugins-good'
+  'gst-plugins-bad'
+  'gst-plugins-ugly'
+  'gst-libav'
+  'gst-editing-services'
+  'ffmpeg'
+)
+makedepends=('cargo' 'librsvg')
+optdepends=(
+  'mpv: inline playback in the terminal UI'
+  'gst-plugin-va: hardware decode/encode (opt-in via VIODE_HWACCEL after viode bench)'
+  'whisper.cpp: transcription, edit-by-text, and captions'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP') # filled in at release time, see the release checklist
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo build --frozen --release -p viode-cli
+  ./scripts/gen-icons.sh
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/viode "$pkgdir/usr/bin/viode"
+  install -Dm644 packaging/linux/viode.desktop \
+    "$pkgdir/usr/share/applications/viode.desktop"
+  install -Dm644 packaging/linux/viode-mime.xml \
+    "$pkgdir/usr/share/mime/packages/viode.xml"
+  for size in 16 24 32 48 64 128 256 512; do
+    install -Dm644 "packaging/icons/hicolor/${size}x${size}/apps/viode.png" \
+      "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/viode.png"
+  done
+  install -Dm644 packaging/icons/hicolor/scalable/apps/viode.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/viode.svg"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

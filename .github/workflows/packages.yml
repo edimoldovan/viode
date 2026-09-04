@@ -1,0 +1,156 @@
+# Builds the Linux installers and proves they install. The rules
+# (CLAUDE.md, "Release rules"): every direct download is complete in
+# itself, package managers are the only dependency exception, and a
+# release goes public only when a user can install from it — so on a
+# v* tag the artifacts land on a DRAFT release, published by hand once
+# every installer (including the Mac app) is attached and verified.
+#
+# The binary is built on ubuntu-latest on purpose: the .deb and .rpm
+# must link the oldest glibc we support. An Arch-built binary does not
+# run on Ubuntu — measured, not guessed.
+#
+# The install gates run in clean containers: apt on Ubuntu, dnf on
+# Fedora with RPM Fusion enabled (ffmpeg and the ugly/libav plugin
+# sets live there; every Fedora media setup has it). The gate is
+# `viode doctor` — the package must produce a working engine with no
+# manual steps.
+name: Packages
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  linux-packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgstreamer-plugins-bad1.0-dev \
+            libges-1.0-dev \
+            librsvg2-bin
+      - name: Install Rust 1.90.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the release binary
+        run: cargo build --release --locked -p viode-cli
+
+      - name: Rasterize icons
+        run: ./scripts/gen-icons.sh
+
+      - name: Determine the package version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=0.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build the .deb and .rpm
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          mkdir -p dist
+          "$(go env GOPATH)/bin/nfpm" package -f packaging/nfpm/nfpm.yaml -p deb -t dist
+          "$(go env GOPATH)/bin/nfpm" package -f packaging/nfpm/nfpm.yaml -p rpm -t dist
+          ls -la dist
+
+      - name: "Gate: the .deb installs and the engine works (Ubuntu)"
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" ubuntu:24.04 bash -ec '
+            apt-get update -qq
+            apt-get install -y -qq /dist/*.deb
+            viode doctor
+          '
+
+      - name: "Gate: the .rpm installs and the engine works (Fedora)"
+        run: |
+          docker run --rm -v "$PWD/dist:/dist" fedora:42 bash -ec '
+            dnf install -y -q https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-42.noarch.rpm
+            dnf install -y /dist/*.rpm
+            viode doctor
+          '
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: dist/*
+
+      - name: Stage on the draft release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+            --title "Viode $GITHUB_REF_NAME" \
+            --notes "Draft — published when every installer is attached and verified." \
+            2>/dev/null || true
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  # The Homebrew formula must keep building from a plain source
+  # tarball against brew's own gstreamer and ffmpeg. The gate rewrites
+  # the formula's url to a tarball of this commit and really installs
+  # it — a broken formula fails the push that broke it.
+  homebrew-formula:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Gate: the formula builds and installs (brew)"
+        run: |
+          git archive --prefix=viode-0.1.0/ -o /tmp/viode-0.1.0.tar.gz HEAD
+          sha="$(shasum -a 256 /tmp/viode-0.1.0.tar.gz | cut -d' ' -f1)"
+          sed -e "s|^  url .*|  url \"file:///tmp/viode-0.1.0.tar.gz\"|" \
+              -e "s|^  sha256 .*|  sha256 \"$sha\"|" \
+              packaging/homebrew/viode.rb > /tmp/viode.rb
+          brew install --build-from-source --formula /tmp/viode.rb
+          viode --version
+          viode doctor
+
+  # The AUR package must keep building from a plain source tarball; the
+  # PKGBUILD's build and package steps run here against this commit in
+  # an Arch container, so a broken PKGBUILD fails the push that broke
+  # it, not the release day.
+  arch-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Gate: the PKGBUILD builds and installs (Arch)"
+        run: |
+          docker run --rm -v "$PWD:/repo" archlinux:base-devel bash -ec '
+            pacman -Syu --noconfirm --needed git rust librsvg \
+              gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad \
+              gst-plugins-ugly gst-libav gst-editing-services ffmpeg > /dev/null
+            git config --global --add safe.directory /repo
+            useradd -m build
+            cd /home/build
+            sudo -u build mkdir pkg
+            git -C /repo archive --prefix=viode-0.1.0/ HEAD | sudo -u build tar -x -C pkg
+            sudo -u build tar -czf pkg/viode-0.1.0.tar.gz -C pkg viode-0.1.0
+            sed "s|^source=.*|source=(\"viode-0.1.0.tar.gz\")|" \
+              /repo/packaging/aur/PKGBUILD > /tmp/PKGBUILD
+            install -o build /tmp/PKGBUILD pkg/PKGBUILD
+            cd pkg && sudo -u build makepkg -f --nodeps
+            pacman -U --noconfirm viode-*.pkg.tar.zst
+            viode doctor
+          '

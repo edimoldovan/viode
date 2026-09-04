@@ -1,0 +1,73 @@
+# One config, two native packages: nfpm builds the .deb and the .rpm
+# from the same contents, with dependency names overridden per family.
+# The rule these serve: the user's package manager installs the whole
+# engine — nobody reads a dependency list. Fedora note: ffmpeg and the
+# ugly/libav GStreamer sets live in RPM Fusion; a video editor cannot
+# work without them, so the .rpm declares them and the install gate
+# runs with RPM Fusion enabled, the same setup every Fedora media app
+# expects.
+name: viode
+arch: amd64
+platform: linux
+version: ${VERSION}
+maintainer: Eduard Moldovan <himself@eduardmoldovan.com>
+description: >-
+  AI-native video editor: desktop app, terminal UI, CLI, and an AI
+  connection over one engine. The timeline is a readable text file.
+homepage: https://github.com/edimoldovan/viode
+license: PolyForm Free Trial 1.0.0
+
+contents:
+  - src: target/release/viode
+    dst: /usr/bin/viode
+  - src: packaging/linux/viode.desktop
+    dst: /usr/share/applications/viode.desktop
+  - src: packaging/linux/viode-mime.xml
+    dst: /usr/share/mime/packages/viode.xml
+  - src: packaging/icons/hicolor/16x16/apps/viode.png
+    dst: /usr/share/icons/hicolor/16x16/apps/viode.png
+  - src: packaging/icons/hicolor/24x24/apps/viode.png
+    dst: /usr/share/icons/hicolor/24x24/apps/viode.png
+  - src: packaging/icons/hicolor/32x32/apps/viode.png
+    dst: /usr/share/icons/hicolor/32x32/apps/viode.png
+  - src: packaging/icons/hicolor/48x48/apps/viode.png
+    dst: /usr/share/icons/hicolor/48x48/apps/viode.png
+  - src: packaging/icons/hicolor/64x64/apps/viode.png
+    dst: /usr/share/icons/hicolor/64x64/apps/viode.png
+  - src: packaging/icons/hicolor/128x128/apps/viode.png
+    dst: /usr/share/icons/hicolor/128x128/apps/viode.png
+  - src: packaging/icons/hicolor/256x256/apps/viode.png
+    dst: /usr/share/icons/hicolor/256x256/apps/viode.png
+  - src: packaging/icons/hicolor/512x512/apps/viode.png
+    dst: /usr/share/icons/hicolor/512x512/apps/viode.png
+  - src: packaging/icons/hicolor/scalable/apps/viode.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/viode.svg
+  - src: LICENSE
+    dst: /usr/share/licenses/viode/LICENSE
+
+overrides:
+  deb:
+    depends:
+      - libgstreamer1.0-0
+      - libgstreamer-plugins-base1.0-0
+      - libgstreamer-plugins-bad1.0-0
+      - libges-1.0-0
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-libav
+      - ffmpeg
+    recommends:
+      - mpv
+  rpm:
+    depends:
+      - gstreamer1
+      - gstreamer1-plugins-base
+      - gstreamer1-plugins-good
+      - gstreamer1-plugins-bad-free
+      - gstreamer1-plugins-ugly
+      - gstreamer1-libav
+      - gst-editing-services
+      - ffmpeg
+    recommends:
+      - mpv
