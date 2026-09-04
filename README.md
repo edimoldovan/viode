@@ -140,16 +140,9 @@ Apple hardware anyway. Linux keeps the OpenGL renderer.
 
 ## Install
 
-Proper installers — an AUR package, a Homebrew formula, .deb/.rpm, and
-a drag-and-drop Mac app that carries its whole engine inside — are the
-distribution work currently in progress; each brings everything it
-needs.
-
-Until they land, [every release](https://github.com/edimoldovan/viode/releases/latest)
-carries raw prebuilt binaries for Linux (x86_64) and Apple-silicon
-Macs, for people comfortable managing their own system: unpack, put
-`viode` on your PATH, install the requirements below, and run
-`viode doctor` — it names anything missing.
+Installers — an AUR package, a Homebrew formula, .deb/.rpm, and a
+drag-and-drop Mac app that carries its whole engine inside — are being
+built now. Until they land, Viode builds from source:
 
 Requirements (Arch package names; any distro works with equivalents):
 

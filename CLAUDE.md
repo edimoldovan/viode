@@ -439,22 +439,27 @@ optional elements and errors actionably, official bundles ship a
 complete GStreamer we control, and CI runs on the weakest
 environment (brew) so gaps surface before users see them.
 
-**The v0.1.0 release spine (2026-09-04) — done.**
-`.github/workflows/release.yml`: pushing a `v*` tag runs the full
-suite on both platforms as a final gate, then attaches
-`viode-<tag>-{linux-x86_64,macos-arm64}.tar.gz` (binary + README +
-LICENSE, with SHA-256 sums) to a GitHub Release — the public repo's
-release page is where every download lives, and `/releases/latest` is
-the stable URL the marketing page and packages point at. The README
-Install section points there. `docs/RELEASING.md` is the checklist
-(tag push -> watch -> verify, plus the future PKGBUILD/formula bumps).
-The binaries are UNGATED evaluation builds on purpose (Viode is free
-for now); RELEASING.md records the three-step switch to official
-license-checking builds once Ed pushes viode-license to a private
-remote and adds a deploy key to Actions secrets. Mac-bundle decisions
-folded into PLAN-MAC.md the same day: .dmg delivery, models bundled in
-Contents/Resources, engine completeness acceptance = all-green doctor
-on a brew-less Mac.
+**Release rules (2026-09-04, Ed, binding — learned the hard way).**
+A v0.1.0 was tagged with raw binary tarballs, then with nothing;
+both were wrong and the release and tag were deleted the same day.
+The rules that came out of it:
+1. **A release is a usable release.** No tag, no release page, until
+   a user can actually install Viode from it. No "release spine"
+   shipped ahead of the installers — the tag lands WITH them.
+2. **Every direct download is complete in itself.** A Mac user
+   downloads one .dmg and that is ALL they will ever do — no brew,
+   no dependency list, ever. Same for .deb/.rpm users beyond their
+   package manager doing its normal job.
+3. **Package managers are the only dependency exception** (AUR,
+   Homebrew, apt, dnf), because they install declared dependencies
+   themselves without the user reading anything.
+Therefore v0.1.0 means: AUR package + Homebrew formula + .deb/.rpm +
+the self-contained notarized .app, all working, attached to one
+release, tagged once. The ungated-vs-licensed build question and the
+release checklist get settled inside that work. Mac-bundle decisions
+already folded into PLAN-MAC.md: .dmg delivery, models bundled in
+Contents/Resources, completeness acceptance = all-green doctor on a
+brew-less Mac.
 
 **Phase 9 (distribution) — in progress.** Ed's decision (2026-09-01):
 users must be able to install on Linux, macOS, and Windows. Windows is
