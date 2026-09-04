@@ -406,6 +406,19 @@ Linux and macOS) is stage 0, the immediate next work — only
 user-facing packaging waits. This supersedes the
 Phase 9 ordering below; details in the local-only PLAN.md.
 
+**The user manual (2026-09-04) — done.** A proper manual for video
+editors lives at eduardmoldovan.com/viode/manual (fastpost-go:
+viode-manual.html template, viode-manual.css, ViodeManual handler,
+linked from the marketing page's hero and pro-grammar section; Ed
+commits fastpost himself). Binding rule from Ed, same day: **no video
+editor should be using the terminal for anything** — the manual is
+GUI-only (mouse paths and shortcuts, zero commands), written as if
+the installers already exist ("download, drag to Applications,
+open"), with a Coming-from-Premiere translation table as its
+centerpiece. It falls under the same standing rule as the marketing
+page: every wave that ships user-facing capability updates the manual
+in the same working session.
+
 **CI (stage 0) — done (2026-09-02).** `.github/workflows/ci.yml`
 builds the workspace and runs the full suite with `--locked` on
 ubuntu-latest and macos-latest on every push and PR, toolchain pinned
