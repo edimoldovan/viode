@@ -414,8 +414,11 @@ commits fastpost himself). Binding rule from Ed, same day: **no video
 editor should be using the terminal for anything** — the manual is
 GUI-only (mouse paths and shortcuts, zero commands), written as if
 the installers already exist ("download, drag to Applications,
-open"), with a Coming-from-Premiere translation table as its
-centerpiece. It falls under the same standing rule as the marketing
+open"). Second ruling (2026-09-05): **the manual names no
+competitors** — the original Coming-from-Premiere translation table
+is gone, and the tone is sober reference, not marketing — every
+capability documented for use, each reachable from a grouped
+sidebar. It falls under the same standing rule as the marketing
 page: every wave that ships user-facing capability updates the manual
 in the same working session.
 
