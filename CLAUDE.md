@@ -574,8 +574,16 @@ Free Trial 1.0.0 (LICENSE at the repo root, Ed's decision 2026-09-02):
 source is visible and anyone may evaluate it for up to 32 consecutive
 days; continued use requires a paid subscription — a low monthly price,
 sold exclusively through eduardmoldovan.com under Ed's own commercial
-agreement. There is no free personal-use tier. Redistribution stays
-prohibited. There will be no hosted "Viode Cloud" services — Ed has
+agreement. There is no free personal-use tier. Pricing adopted
+2026-09-05 (public on the marketing page): $15/month or $144/year,
+one tier, perpetual fallback after 12 paid months (the last paid
+version keeps working), founder pricing for the first cohort, PPP
+regional pricing at launch, never lifetime deals. Research digest
+and rationale: MONETIZATION.md; the product work it demands is
+PLAN.md's "conversion wave" (Resolve benchmark before any speed
+claim, autocut, word-level transcription, license entitlement
+fields, trial-run polish) plus a branding pass, both tracked there.
+Redistribution stays prohibited. There will be no hosted "Viode Cloud" services — Ed has
 ruled them out permanently. Business analysis: MONETIZATION.md.
 Outside contributions require a signed grant to the company before
 merging.
