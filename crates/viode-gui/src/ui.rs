@@ -514,6 +514,24 @@ impl GuiApp {
             Action::Redo => self.edit(|e, _| e.redo()),
             Action::Save => self.save(),
             Action::RenderDialog => self.show_render = !self.show_render,
+            Action::Watch => {
+                self.editor.message = match viode_core::watch::watch(
+                    &self.project_dir,
+                    &self.editor.project,
+                    None,
+                ) {
+                    Ok(w) => format!(
+                        "watching {} in {} — {} chapter(s)",
+                        w.file
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default(),
+                        w.player,
+                        w.chapters
+                    ),
+                    Err(e) => format!("watch: {e}"),
+                };
+            }
             Action::ToggleScopes => {
                 self.scopes_on = !self.scopes_on;
                 self.scope_key = None;

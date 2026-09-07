@@ -129,6 +129,17 @@ fn commands_outside_a_project_fail_helpfully() {
 }
 
 #[test]
+fn watch_without_renders_says_render_first() {
+    let tmp = tempfile::tempdir().unwrap();
+    viode(tmp.path()).args(["new", "w"]).assert().success();
+    viode(&tmp.path().join("w"))
+        .arg("watch")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("render first"));
+}
+
+#[test]
 fn full_edit_workflow() {
     if !ffmpeg_available() {
         eprintln!("SKIP full_edit_workflow: ffmpeg not installed");

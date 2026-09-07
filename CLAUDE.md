@@ -390,6 +390,21 @@ viode_core::media so CLI and GUI share one contract (CLI keeps its
 "imported" message). The registry test now pins AddMedia as the first
 palette entry.
 
+**`viode watch` + the model briefing (2026-09-05) — done.** `watch`
+(core::watch, CLI verb, MCP tool, GUI palette action — TUI exempt per
+the transcribe precedent, it has inline playback) opens the newest
+render (or a given file) in mpv, detached, with a chapter list
+generated from the project's markers and main-track cuts (ffmetadata,
+markers win over cut names at the same time; pure planner
+unit-tested); falls back to xdg-open/open without mpv, and mpv was
+already a doctor check. The MCP initialize `instructions` now lead
+with a full editing BRIEFING (use the senses, proxy long footage,
+SOURCE vs timeline time, the long-form flow, ui_open/watch for the
+user, verify before done) — it ships inside the binary, so every
+install and every AI client gets it with zero setup; tune model
+editing behavior by editing that constant in viode-mcp/src/lib.rs.
+Manual (Delivery -> "Reviewing a render") and README updated.
+
 **The settled implementation order (2026-09-02, Ed's ruling).**
 Distribution goes LAST — the first version anyone installs must
 already be feature-rich for a broad audience. Order: discoverability

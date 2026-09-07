@@ -398,6 +398,21 @@ pub fn definitions() -> Vec<Value> {
             &[],
         ),
         tool(
+            "watch",
+            "Open a finished render in a video player ON THE USER'S \
+             SCREEN, detached — returns immediately. Defaults to the \
+             newest file in renders/; pass `file` for a specific one. \
+             The project's markers and cuts become player chapters, so \
+             the user can jump edit to edit. Use this after rendering \
+             when the user wants to see or review the result; for \
+             checking the edit BEFORE a render, use ui_open (live \
+             preview) or render_preview instead.",
+            json!({
+                "file": { "type": "string", "description": "path of the render to open (optional; defaults to the newest render)" }
+            }),
+            &[],
+        ),
+        tool(
             "ui_open",
             "Open the video editor UI for the current project: a GUI window \
              on the user's screen with the live composited preview, the \
@@ -1037,6 +1052,7 @@ pub fn dispatch(server: &mut Server, name: &str, args: &Value) -> Result<Vec<Val
         }),
         "scope" => scope_tool(server, args),
         "play" => play_tool(server, args),
+        "watch" => watch_tool(server, args),
         "ui_open" => ui_open(server),
         "tui_open" => tui_open(server),
         "media_missing" => media_missing(server),
@@ -1595,6 +1611,19 @@ fn play_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
 
 /// Open the GUI editor window (detached — returns immediately; it
 /// live-reloads as further MCP edits save the project).
+fn watch_tool(server: &Server, args: &Value) -> Result<Vec<Value>> {
+    let (file, dir) = require_project(server)?;
+    let project = Project::load(&file)?;
+    let wanted = args.get("file").and_then(Value::as_str).map(PathBuf::from);
+    let watched = viode_core::watch::watch(&dir, &project, wanted.as_deref())?;
+    Ok(text(format!(
+        "opened {} in {} with {} chapter(s) — the player is on the user's screen; they close it",
+        watched.file.display(),
+        watched.player,
+        watched.chapters
+    )))
+}
+
 fn ui_open(server: &Server) -> Result<Vec<Value>> {
     let (file, _) = require_project(server)?;
     let exe = std::env::current_exe()?;

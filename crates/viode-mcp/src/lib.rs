@@ -73,11 +73,40 @@ fn initialize(params: &Value) -> Value {
             "version": env!("CARGO_PKG_VERSION"),
         }
     });
+    // The editing briefing: Viode's own working knowledge, delivered to
+    // every connected model at handshake. It ships inside the binary,
+    // so every install carries it — nothing to copy or configure.
+    const BRIEFING: &str = "You are operating Viode, a professional \
+        video editor, with its complete tool surface. Work like an \
+        editor, not a script: \
+        (1) Ground the session in a project first (project_new or \
+        project_open); clip_add copies footage in. \
+        (2) You have senses — use them. frame_grab shows you any \
+        timeline moment, waveform and audio_levels show the sound, \
+        scope measures color, timeline_get shows structure, and \
+        render_preview checks a section cheaply. Look before you cut, \
+        and look again before declaring anything done. \
+        (3) On long or 4K footage, run proxy_build early — everything \
+        interactive gets fast. \
+        (4) silence_detect and scene_detect answer in SOURCE time \
+        (positions inside the file), not timeline time. \
+        (5) A proven long-form flow: silence_cut for dead air, \
+        angle_add + take for multicam, duck to seat music under \
+        speech, clean for voice noise, captions, then render with a \
+        preset (youtube, shorts, podcast; shorts can reframe onto the \
+        subject's face). \
+        (6) Keep the user watching when they want to: ui_open shows a \
+        live editor window that follows every edit you make. After a \
+        render, watch opens the finished file in a player with \
+        chapters at your cuts and markers. \
+        (7) Prefer many small verified steps over one blind batch — \
+        every edit is undoable and the timeline is a readable file.";
+
     // The engine checkup runs once at initialize so the model knows this
     // machine's gaps BEFORE it plans an edit (the `instructions` field is
     // shown to the client's model). A complete machine adds nothing.
     let problems = viode_core::doctor::problems();
-    let mut instructions = Vec::new();
+    let mut instructions = vec![BRIEFING.to_string()];
     if let Some(summary) = viode_core::doctor::summary(&problems) {
         instructions.push(format!(
             "{summary} The doctor tool returns the full report; features \
@@ -92,9 +121,7 @@ fn initialize(params: &Value) -> Value {
             instructions.push(format!("Announcement from the Viode developer: {notice}"));
         }
     }
-    if !instructions.is_empty() {
-        result["instructions"] = json!(instructions.join(" "));
-    }
+    result["instructions"] = json!(instructions.join("\n\n"));
     result
 }
 

@@ -315,6 +315,9 @@ enum Cmd {
         #[arg(long, default_value = "0")]
         from: String,
     },
+    /// Open the newest render (or a file) in the player — markers and
+    /// cuts become chapters, so the viewer jumps edit to edit
+    Watch { file: Option<PathBuf> },
     /// Render queue: add jobs, run them in order
     Queue {
         #[command(subcommand)]
@@ -1042,6 +1045,18 @@ pub fn run() -> Result<()> {
             println!("live preview — close the window or wait for the end");
             let start = Time::parse(&from)?;
             viode_core::run_gui(move || viode_core::preview_play(&project, &dir, start))?;
+            Ok(())
+        }
+        Cmd::Watch { file } => {
+            let project = Project::load(&cli.project)?;
+            let dir = project_dir(&cli.project);
+            let watched = viode_core::watch::watch(&dir, &project, file.as_deref())?;
+            println!(
+                "watching {} in {} — {} chapter(s)",
+                watched.file.display(),
+                watched.player,
+                watched.chapters
+            );
             Ok(())
         }
         Cmd::Queue { cmd } => cmd_queue(&cli.project, cmd),

@@ -30,6 +30,7 @@ pub mod sync;
 pub mod time;
 pub mod transcript;
 pub mod visual;
+pub mod watch;
 
 pub use audio::{audio_levels, audio_scan, detect_scenes, detect_silences, AnalyzeError, AudioScan,
     DEFAULT_LEVEL_WINDOW, DEFAULT_MIN_SILENCE, DEFAULT_NOISE_DB};

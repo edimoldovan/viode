@@ -338,6 +338,7 @@ viode scope <i> [--kind waveform|vector]        colorist's instruments (PNG)
 viode speed <i> <rate>                          2 = fast, 0.5 = slow motion
 viode roll/slip/slide <i> <±sec>                pro trim grammar (totals preserved)
 viode play [--from T]                           LIVE composited preview, no render
+viode watch [file]                              newest render in mpv; markers/cuts become chapters
 viode queue add/ls/run/clear                    render queue
 viode media ls/missing · viode relink <dir>     media management, reconnect moved files
 viode freeze <t> [--dur 2]                      frame hold: freeze the frame at t
@@ -479,6 +480,14 @@ CLI verb as a tool, plus senses:
 - `ui_open` — opens the GUI on the user's screen; it live-reloads on
   every MCP edit, so the user watches the AI cut in real time ("open the
   UI" always means the GUI; `tui_open` exists for explicit TUI requests)
+- `watch` — opens a finished render in a player on the user's screen,
+  with the project's markers and cuts as chapters for edit-to-edit
+  jumping
+
+The server also briefs the model at connection time: how to work with
+senses, proxy long footage, read SOURCE vs timeline time, and verify
+its own cuts — the briefing ships inside the binary, so every install
+and every connected AI gets it with zero setup.
 
 A realistic prompt: *"Create a project from the clips in ~/footage, open
 the UI, cut the silences out of clip 0, and render a shorts version"* —
